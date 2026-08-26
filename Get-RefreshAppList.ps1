@@ -136,6 +136,7 @@ function ConvertTo-NormalizedPublisher {
         entry per company instead of one per spelling.
 
             'Dell' / 'Dell Inc.' / 'Dell Technologies'  -> 'dell'
+            'Dell Products'                             -> 'dell'
             'Realtek Semiconductor'                     -> 'realtek'
             'INTEL' / 'Intel Corporation'               -> 'intel'
 
@@ -150,7 +151,7 @@ function ConvertTo-NormalizedPublisher {
     $n = $n -replace '[,\.]', ' '
     $n = ($n -replace '\s+', ' ').Trim()
 
-    $suffix = '(incorporated|inc|corporation|corp|company|co|limited|ltd|llc|gmbh|technologies|technology|software|semiconductor|systems|electronics|group|holdings)'
+    $suffix = '(incorporated|inc|corporation|corp|company|co|limited|ltd|llc|gmbh|technologies|technology|software|semiconductor|systems|electronics|group|holdings|products)'
     while ($n -match "\s$suffix\s*$") {
         $n = ($n -replace "\s$suffix\s*$", '').Trim()
     }
@@ -541,15 +542,25 @@ function Export-InstallSheetPdf {
         '--headless=new'
         '--disable-gpu'
         '--no-first-run'
+        '--log-level=3'
         '--no-pdf-header-footer'
         "--user-data-dir=`"$profileDir`""
         "--print-to-pdf=`"$full`""
         "`"$(([uri]$htmlPath).AbsoluteUri)`""
     )
 
+    # Chromium chatters on stderr even on a clean render, and -NoNewWindow puts
+    # that straight into the tech's console. Capture both streams; surface them
+    # only if the render actually failed.
+    $outLog = [IO.Path]::GetTempFileName()
+    $errLog = [IO.Path]::GetTempFileName()
+
     try {
         if (Test-Path $full) { Remove-Item $full -Force -ErrorAction SilentlyContinue }
-        $proc = Start-Process -FilePath $browser -ArgumentList $arguments -NoNewWindow -Wait -PassThru -ErrorAction Stop
+
+        $proc = Start-Process -FilePath $browser -ArgumentList $arguments `
+                              -NoNewWindow -Wait -PassThru -ErrorAction Stop `
+                              -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 
         if ((Test-Path $full) -and ((Get-Item $full).Length -gt 0)) {
             Remove-Item $htmlPath -Force -ErrorAction SilentlyContinue
@@ -557,12 +568,15 @@ function Export-InstallSheetPdf {
         }
 
         Write-Warning "$(Split-Path -Leaf $browser) exited with code $($proc.ExitCode) without producing a PDF."
+        $detail = @(Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 3)
+        foreach ($line in $detail) { Write-Host "    $line" -ForegroundColor DarkGray }
     }
     catch {
         Write-Warning "Could not run $browser`: $($_.Exception.Message)"
     }
     finally {
         Remove-Item $profileDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $outLog, $errLog -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "  Sheet saved as HTML instead: $htmlPath" -ForegroundColor Yellow

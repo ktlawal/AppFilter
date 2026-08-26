@@ -75,6 +75,10 @@ Assert-Key 'INTEL'                         'intel'              $pubFn
 Assert-Key 'Intel Corporation'             'intel'              $pubFn
 Assert-Key 'Realtek Semiconductor'         'realtek'            $pubFn
 Assert-Key 'Realtek Semiconductor Corp.'   'realtek'            $pubFn
+# Seen on a real refresh: 'Dell Products' was escaping the driver rule.
+Assert-Key 'Dell Products'                 'dell'               $pubFn
+Assert-Key 'Adobe Systems'                 'adobe'              $pubFn
+Assert-Key 'Adobe Systems Incorporated'    'adobe'              $pubFn
 # Suffixes only come off the end, so these keep their distinguishing words.
 Assert-Key 'Advanced Micro Devices'        'advanced micro devices' $pubFn
 Assert-Key 'Alps Electric Co., Ltd.'       'alps electric'      $pubFn

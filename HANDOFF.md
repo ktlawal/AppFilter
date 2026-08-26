@@ -164,7 +164,10 @@ and `Alps Electric` keep their distinguishing words.
 This fixed a live gap: the old list matched `appPublisher` exactly, and
 `Dell Technologies` was not in it — `Dell Optimizer` and `Dell Trusted Device`
 were escaping the driver rule entirely and were only suppressed because they
-happened to be in the baseline by name.
+happened to be in the baseline by name. A later real run turned up
+`Dell Products` (on `Dell Digital Delivery`) the same way, which is why
+`products` is in the suffix list. Expect to add a suffix occasionally; each one
+is a one-word change plus a test case.
 
 Test 3 still matches on the raw name. Version is never compared — name only.
 
@@ -305,6 +308,12 @@ in the base image. Details that matter:
 - The PDF path depends on a Chromium-based browser being present. That is a
   safe assumption on the image (Edge and Chrome are both baseline entries) but
   it is a dependency, and the fallback is HTML rather than a hard failure.
+- **Short-name variants are the recurring miss.** Absolute reported `OneDrive`
+  on a real device while the baseline carried `Microsoft OneDrive`;
+  normalization does not bridge those, so it needed its own row
+  (`Source=name-variant`). Inbox Store apps are the usual offenders — they tend
+  to arrive under a bare product name. When a run surfaces something obviously
+  in-box, that is what the curation prompt is for.
 - Store app display names can arrive localized, so a single baseline entry may
   not match across machines. Normalization does not help here — a localized
   name needs its own baseline row.
