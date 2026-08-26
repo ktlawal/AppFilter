@@ -115,9 +115,9 @@ publisher string. Match on `appName`.
 ## Files
 
 - `Get-RefreshAppList.ps1` — main tool. `[-Serial <serial>]` `[-ShowFiltered]`
-  `[-NoPrompt]` `[-OutputCsv <path>]` `[-OutputPdf <path>]` `[-NoPdf]`. With no
-  serial and no device name it asks for a serial; an empty answer exits without
-  doing anything.
+  `[-NoPrompt]` `[-OutputCsv <path>]` `[-OutputHtml <path>]` `[-NoSheet]`. With
+  no serial and no device name it asks for a serial; an empty answer exits
+  without doing anything.
 - `BaseImageApps.csv` — exclusion list, columns
   `AppName,Publisher,Source,AddedOn,AddedBy,Serial`
 - `Test-Normalization.ps1` — asserts both normalizers against the name shapes
@@ -275,30 +275,41 @@ the current run's classification is left as it was.
 
 ## Printable sheet
 
-**Every run leaves a sheet behind.** With no `-OutputPdf` the file lands in the
-working directory as `<serial>-InstallList.pdf` (falling back to the device
-name, with invalid filename characters replaced). `-OutputPdf` puts it
-somewhere specific — missing directories are created, a missing `.pdf`
-extension is added — and `-NoPdf` turns it off for a console-only run.
+**Every run leaves a sheet behind.** With no `-OutputHtml` the file lands in
+the working directory as `<serial>-InstallList.html` (falling back to the
+device name, with invalid filename characters replaced). `-OutputHtml` puts it
+somewhere specific — relative and absolute paths both work, missing directories
+are created, a missing `.html` extension is added — and `-NoSheet` turns it off
+for a console-only run.
 
-The sheet is a one-page worksheet: device identity across the
-top, then the install list as a tick-box table with a Notes column, and a
-footer giving the install count and how many applications were suppressed. A
-non-active agent or a scan older than 30 days prints as a boxed warning on the
-sheet itself, not just in the console.
+The sheet is a one-page worksheet: a **Print this sheet** button at the top,
+then device identity, the install list as a tick-box table with a Notes column,
+and a footer giving the install count and how many applications were
+suppressed. A non-active agent or a scan older than 30 days appears as a boxed
+warning on the sheet itself, not just in the console.
 
-There is no PDF module involved. The script builds HTML and renders it through
-**Edge or Chrome headless** (`--headless=new --print-to-pdf`), both of which are
-in the base image. Details that matter:
+Open it, click Print. The button calls `window.print()`; it and the rest of the
+screen-only furniture (grey backdrop, card padding, drop shadow) are hidden
+under `@media print`, so what reaches the paper is just the sheet. Verified by
+forcing the print block to apply on screen and rendering it.
 
-- the browser runs against a throwaway `--user-data-dir`, otherwise headless
-  can exit without rendering when the tech already has that browser open
-- `--no-pdf-header-footer` suppresses Chrome's own URL/date furniture
-- if no browser is found, or it fails, the **HTML is left on disk** and the
-  path is printed — the sheet can still be printed by hand with Ctrl+P
-- `APPFILTER_BROWSER` overrides the browser path for an unusual install
-- relative and absolute `-OutputPdf` paths both work, and a missing `.pdf`
-  extension is added
+This used to render a PDF by driving Edge or Chrome headless. That is gone —
+along with `Find-PdfBrowser`, `APPFILTER_BROWSER`, the throwaway profile
+directory and the subprocess wait. Plain HTML prints just as well, has no
+browser dependency, and leaves nothing running after the script ends.
+
+## Exit behaviour
+
+The script ends with an explicit `exit`, so nothing lingers after a run:
+
+- `exit 0` — normal completion, and when the operator answers the serial
+  prompt with nothing
+- `exit 1` — no application inventory came back for the device
+
+Note that `exit` inside a `.ps1` ends the *script*, not the console window it
+was launched from. Running `.\Get-RefreshAppList.ps1` from an open prompt
+returns you to that prompt, which is correct. Launch it as
+`pwsh -File .\Get-RefreshAppList.ps1` if the window itself should close.
 
 ## Known caveats
 
@@ -316,9 +327,6 @@ in the base image. Details that matter:
   real ones; narrowing it is now much safer than it used to be.
 - Check `agentStatus` and `lastScanDateTimeUtc` before trusting an inventory.
   A disabled or long-disconnected agent yields stale or empty results.
-- The PDF path depends on a Chromium-based browser being present. That is a
-  safe assumption on the image (Edge and Chrome are both baseline entries) but
-  it is a dependency, and the fallback is HTML rather than a hard failure.
 - **Short-name variants are the recurring miss.** Absolute reported `OneDrive`
   on a real device while the baseline carried `Microsoft OneDrive`;
   normalization does not bridge those, so it needed its own row

@@ -24,11 +24,9 @@
     .\Get-RefreshAppList.ps1 -Serial JLY4F42
 
     Every run leaves a printable tick-list in the current directory, named
-    after the device - here .\JLY4F42-InstallList.pdf. Use -OutputPdf to put
-    it somewhere else, or -NoPdf for console output only.
-
-    The PDF is produced by driving Edge (or Chrome) headless - no modules,
-    nothing to install. Set APPFILTER_BROWSER if neither is in its usual place.
+    after the device - here .\JLY4F42-InstallList.html. Open it and click
+    Print. Use -OutputHtml to put it somewhere else, or -NoSheet for console
+    output only.
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Serial')]
@@ -50,10 +48,10 @@ param(
     [string]$OutputCsv,
 
     # Printable tick-list for the bench. Written to the current directory as
-    # <serial>-InstallList.pdf unless a path is given here or -NoPdf is set.
-    [string]$OutputPdf,
+    # <serial>-InstallList.html unless a path is given here or -NoSheet is set.
+    [string]$OutputHtml,
 
-    [switch]$NoPdf
+    [switch]$NoSheet
 )
 
 # --- CONFIGURATION -------------------------------------------------
@@ -382,6 +380,10 @@ function New-InstallSheetHtml {
         A worksheet, not a report: a tick box per row so the sheet can be
         worked through on the bench, and enough device identity at the top that
         a printed page is still traceable once it leaves the screen.
+
+        Print button at the top calls window.print(); it and the rest of the
+        screen-only furniture disappear under @media print, so what comes out
+        of the printer is just the sheet.
     #>
     param(
         [Parameter(Mandatory)]$Device,
@@ -426,13 +428,23 @@ function New-InstallSheetHtml {
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Applications to install - $(ConvertTo-HtmlText ([string]$Device.serialNumber))</title>
 <style>
   @page { size: A4 portrait; margin: 14mm 12mm; }
   * { box-sizing: border-box; }
   body { font-family: Segoe UI, Calibri, Arial, sans-serif; font-size: 10.5pt;
-         color: #000; background: #fff; margin: 0; }
+         color: #000; background: #f4f4f5; margin: 0; padding: 8mm; }
+  .sheet { max-width: 195mm; margin: 0 auto; background: #fff; padding: 10mm;
+           box-shadow: 0 1px 4px rgba(0,0,0,.18); }
   h1 { font-size: 15pt; margin: 0 0 2mm; }
+  .toolbar { max-width: 195mm; margin: 0 auto 4mm; display: flex; gap: 3mm;
+             align-items: center; }
+  button.print { font: inherit; font-weight: 600; padding: 2.5mm 6mm;
+                 border: 1px solid #000; background: #000; color: #fff;
+                 border-radius: 3px; cursor: pointer; }
+  button.print:hover { background: #333; border-color: #333; }
+  .hint { font-size: 9pt; color: #555; }
   .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1mm 6mm;
           border-top: 1.5pt solid #000; border-bottom: 0.5pt solid #000;
           padding: 2mm 0; margin-bottom: 3mm; }
@@ -457,139 +469,74 @@ function New-InstallSheetHtml {
   .none { color: #555; font-style: italic; }
   .foot { margin-top: 4mm; padding-top: 2mm; border-top: 0.5pt solid #000;
           font-size: 8.5pt; color: #333; }
+
+  /* What actually reaches the paper: the sheet, nothing else. */
+  @media print {
+    body { background: #fff; padding: 0; }
+    .sheet { max-width: none; margin: 0; padding: 0; box-shadow: none; }
+    .screen-only { display: none !important; }
+  }
 </style>
 </head>
 <body>
-  <h1>Applications to install</h1>
-  <div class="meta">
-    <div><span>Device</span>$(ConvertTo-HtmlText ([string]$Device.deviceName))</div>
-    <div><span>Serial</span>$(ConvertTo-HtmlText ([string]$Device.serialNumber))</div>
-    <div><span>User</span>$(ConvertTo-HtmlText ([string]$Device.username))</div>
-    <div><span>Model</span>$(ConvertTo-HtmlText ([string]$Device.systemModel))</div>
-    <div><span>Last software scan</span>$scanText</div>
-    <div><span>Sheet generated</span>$(Get-Date -Format 'yyyy-MM-dd HH:mm')</div>
+  <div class="toolbar screen-only">
+    <button class="print" type="button" onclick="window.print()">Print this sheet</button>
+    <span class="hint">or press Ctrl+P</span>
   </div>
-$warningHtml  <table>
-    <thead>
-      <tr><th></th><th>Application</th><th>Version</th><th>Publisher</th><th>Notes</th></tr>
-    </thead>
-    <tbody>
+  <div class="sheet">
+    <h1>Applications to install</h1>
+    <div class="meta">
+      <div><span>Device</span>$(ConvertTo-HtmlText ([string]$Device.deviceName))</div>
+      <div><span>Serial</span>$(ConvertTo-HtmlText ([string]$Device.serialNumber))</div>
+      <div><span>User</span>$(ConvertTo-HtmlText ([string]$Device.username))</div>
+      <div><span>Model</span>$(ConvertTo-HtmlText ([string]$Device.systemModel))</div>
+      <div><span>Last software scan</span>$scanText</div>
+      <div><span>Sheet generated</span>$(Get-Date -Format 'yyyy-MM-dd HH:mm')</div>
+    </div>
+$warningHtml    <table>
+      <thead>
+        <tr><th></th><th>Application</th><th>Version</th><th>Publisher</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
 $($rows -join "`n")
-    </tbody>
-  </table>
-  <p class="foot">$($Apps.Count) to install &middot; $SuppressedCount of $TotalCount inventoried applications suppressed as base image, driver or runtime.</p>
+      </tbody>
+    </table>
+    <p class="foot">$($Apps.Count) to install &middot; $SuppressedCount of $TotalCount inventoried applications suppressed as base image, driver or runtime.</p>
+  </div>
 </body>
 </html>
 "@
 }
 
-function Find-PdfBrowser {
+function Save-InstallSheet {
     <#
-        Edge ships with the image and Chrome is in the baseline, so one of these
-        is always present. APPFILTER_BROWSER overrides for an unusual install.
-    #>
-    if ($env:APPFILTER_BROWSER -and (Test-Path $env:APPFILTER_BROWSER)) {
-        return $env:APPFILTER_BROWSER
-    }
-
-    $candidates = @(
-        "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
-        "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
-        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
-        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe"
-    )
-    foreach ($c in $candidates) {
-        if ($c -and (Test-Path $c)) { return $c }
-    }
-
-    foreach ($name in 'msedge.exe', 'chrome.exe') {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
-    }
-
-    return $null
-}
-
-function Export-InstallSheetPdf {
-    <#
-        Renders the sheet through a headless browser. Returns the PDF path on
-        success, or $null - in which case the HTML is left behind so the sheet
-        can still be printed from a browser by hand.
+        Writes the sheet next to wherever the tech is working. Returns the full
+        path, or $null if it could not be written.
     #>
     param(
         [Parameter(Mandatory)][string]$Html,
         [Parameter(Mandatory)][string]$Path
     )
 
-    if (-not [IO.Path]::GetExtension($Path)) { $Path = "$Path.pdf" }
+    if (-not [IO.Path]::GetExtension($Path)) { $Path = "$Path.html" }
 
     # Resolve against the caller's location WITHOUT mangling an already-absolute
     # path - Join-Path would happily glue two roots together.
     $full = [IO.Path]::GetFullPath($Path, (Get-Location).Path)
     $dir  = Split-Path -Parent $full
-    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-
-    $htmlPath = [IO.Path]::ChangeExtension($full, '.html')
-    Set-Content -Path $htmlPath -Value $Html -Encoding UTF8
-
-    $browser = Find-PdfBrowser
-    if (-not $browser) {
-        Write-Warning "Could not find Edge or Chrome to render the PDF."
-        Write-Host "  Sheet saved as HTML instead: $htmlPath" -ForegroundColor Yellow
-        Write-Host "  Open it and print with Ctrl+P, or set APPFILTER_BROWSER to a browser path." -ForegroundColor DarkGray
-        return $null
+    if ($dir -and -not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
-
-    # A throwaway profile keeps this from colliding with a browser the tech
-    # already has open, which otherwise makes headless exit without rendering.
-    $profileDir = Join-Path ([IO.Path]::GetTempPath()) ("appfilter-" + [Guid]::NewGuid().ToString('N'))
-
-    $arguments = @(
-        '--headless=new'
-        '--disable-gpu'
-        '--no-first-run'
-        '--log-level=3'
-        '--no-pdf-header-footer'
-        "--user-data-dir=`"$profileDir`""
-        "--print-to-pdf=`"$full`""
-        "`"$(([uri]$htmlPath).AbsoluteUri)`""
-    )
-
-    # Chromium chatters on stderr even on a clean render, and -NoNewWindow puts
-    # that straight into the tech's console. Capture both streams; surface them
-    # only if the render actually failed.
-    $outLog = [IO.Path]::GetTempFileName()
-    $errLog = [IO.Path]::GetTempFileName()
 
     try {
-        if (Test-Path $full) { Remove-Item $full -Force -ErrorAction SilentlyContinue }
-
-        $proc = Start-Process -FilePath $browser -ArgumentList $arguments `
-                              -NoNewWindow -Wait -PassThru -ErrorAction Stop `
-                              -RedirectStandardOutput $outLog -RedirectStandardError $errLog
-
-        if ((Test-Path $full) -and ((Get-Item $full).Length -gt 0)) {
-            Remove-Item $htmlPath -Force -ErrorAction SilentlyContinue
-            return $full
-        }
-
-        Write-Warning "$(Split-Path -Leaf $browser) exited with code $($proc.ExitCode) without producing a PDF."
-        $detail = @(Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 3)
-        foreach ($line in $detail) { Write-Host "    $line" -ForegroundColor DarkGray }
+        Set-Content -Path $full -Value $Html -Encoding UTF8 -ErrorAction Stop
+        return $full
     }
     catch {
-        Write-Warning "Could not run $browser`: $($_.Exception.Message)"
+        Write-Warning "Could not write the sheet to $full`: $($_.Exception.Message)"
+        return $null
     }
-    finally {
-        Remove-Item $profileDir -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item $outLog, $errLog -Force -ErrorAction SilentlyContinue
-    }
-
-    Write-Host "  Sheet saved as HTML instead: $htmlPath" -ForegroundColor Yellow
-    Write-Host "  Open it and print with Ctrl+P." -ForegroundColor DarkGray
-    return $null
 }
-
 
 # ------------------------------------------------------------------
 #  Ask for a device if none was supplied
@@ -598,7 +545,7 @@ if (-not $Serial -and -not $DeviceName) {
     $Serial = (Read-Host "Serial number").Trim()
     if (-not $Serial) {
         Write-Host "No serial entered - nothing to do." -ForegroundColor Yellow
-        return
+        exit 0
     }
 }
 if ($Serial) { $Serial = $Serial.Trim() }
@@ -637,7 +584,7 @@ $apps = @($apps | Where-Object { [string]$_.deviceUid -eq [string]$device.device
 if ($apps.Count -eq 0) {
     Write-Warning "No application inventory returned for this device."
     Write-Warning "Agent status is '$($device.agentStatus)'. If the agent is disabled or hasn't checked in, the inventory may be missing."
-    return
+    exit 1
 }
 
 
@@ -791,10 +738,10 @@ if ($OutputCsv) {
 # ------------------------------------------------------------------
 #  Optional printable sheet
 # ------------------------------------------------------------------
-if (-not $NoPdf) {
+if (-not $NoSheet) {
 
-    $pdfPath = $OutputPdf
-    if (-not $pdfPath) {
+    $sheetPath = $OutputHtml
+    if (-not $sheetPath) {
         # Default to something predictable in the working directory, so a plain
         # run always leaves a sheet behind rather than only console output.
         $label = @([string]$device.serialNumber, [string]$device.deviceName, 'device' |
@@ -802,11 +749,16 @@ if (-not $NoPdf) {
         foreach ($bad in [IO.Path]::GetInvalidFileNameChars()) { $label = $label.Replace($bad, '_') }
         # Bare name, no ".\" prefix: it resolves against the working directory
         # either way, and stays a legal filename on non-Windows hosts.
-        $pdfPath = "$label-InstallList.pdf"
+        $sheetPath = "$label-InstallList.html"
     }
 
     $html = New-InstallSheetHtml -Device $device -Apps $toInstall -ScanAge $scanAge `
                                  -SuppressedCount $excluded.Count -TotalCount $classified.Count
-    $written = Export-InstallSheetPdf -Html $html -Path $pdfPath
-    if ($written) { Write-Host "Printable sheet saved to $written" -ForegroundColor Green }
+    $written = Save-InstallSheet -Html $html -Path $sheetPath
+    if ($written) {
+        Write-Host "Printable sheet saved to $written" -ForegroundColor Green
+        Write-Host "  Open it and click Print." -ForegroundColor DarkGray
+    }
 }
+
+exit 0
