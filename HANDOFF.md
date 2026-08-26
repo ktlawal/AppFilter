@@ -114,8 +114,10 @@ publisher string. Match on `appName`.
 
 ## Files
 
-- `Get-RefreshAppList.ps1` — main tool. `-Serial <serial>` `[-ShowFiltered]`
-  `[-NoPrompt]` `[-OutputCsv <path>]`
+- `Get-RefreshAppList.ps1` — main tool. `[-Serial <serial>]` `[-ShowFiltered]`
+  `[-NoPrompt]` `[-OutputCsv <path>]` `[-OutputPdf <path>]`. With no serial and
+  no device name it asks for a serial; an empty answer exits without doing
+  anything.
 - `BaseImageApps.csv` — exclusion list, columns
   `AppName,Publisher,Source,AddedOn,AddedBy,Serial`
 - `Test-Normalization.ps1` — asserts both normalizers against the name shapes
@@ -257,6 +259,27 @@ Rows added this way carry `Source=refresh-prompt` along with the date, the
 operator and the serial that prompted them. Additions affect the **next** run;
 the current run's classification is left as it was.
 
+## Printable sheet
+
+`-OutputPdf <path>` writes a one-page worksheet: device identity across the
+top, then the install list as a tick-box table with a Notes column, and a
+footer giving the install count and how many applications were suppressed. A
+non-active agent or a scan older than 30 days prints as a boxed warning on the
+sheet itself, not just in the console.
+
+There is no PDF module involved. The script builds HTML and renders it through
+**Edge or Chrome headless** (`--headless=new --print-to-pdf`), both of which are
+in the base image. Details that matter:
+
+- the browser runs against a throwaway `--user-data-dir`, otherwise headless
+  can exit without rendering when the tech already has that browser open
+- `--no-pdf-header-footer` suppresses Chrome's own URL/date furniture
+- if no browser is found, or it fails, the **HTML is left on disk** and the
+  path is printed — the sheet can still be printed by hand with Ctrl+P
+- `APPFILTER_BROWSER` overrides the browser path for an unusual install
+- relative and absolute `-OutputPdf` paths both work, and a missing `.pdf`
+  extension is added
+
 ## Known caveats
 
 - The baseline now has real provenance but the sample is **2 devices**. An
@@ -273,6 +296,9 @@ the current run's classification is left as it was.
   real ones; narrowing it is now much safer than it used to be.
 - Check `agentStatus` and `lastScanDateTimeUtc` before trusting an inventory.
   A disabled or long-disconnected agent yields stale or empty results.
+- The PDF path depends on a Chromium-based browser being present. That is a
+  safe assumption on the image (Edge and Chrome are both baseline entries) but
+  it is a dependency, and the fallback is HTML rather than a hard failure.
 - Store app display names can arrive localized, so a single baseline entry may
   not match across machines. Normalization does not help here — a localized
   name needs its own baseline row.
