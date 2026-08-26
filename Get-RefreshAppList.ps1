@@ -21,11 +21,14 @@
     .\Get-RefreshAppList.ps1 -Serial JLY4F42 -NoPrompt -OutputCsv .\JLY4F42.csv
 
 .EXAMPLE
-    .\Get-RefreshAppList.ps1 -Serial JLY4F42 -OutputPdf .\JLY4F42.pdf
+    .\Get-RefreshAppList.ps1 -Serial JLY4F42
 
-    Writes a printable tick-list. The PDF is produced by driving Edge (or
-    Chrome) headless - no modules, nothing to install. Set APPFILTER_BROWSER
-    if neither is in its usual place.
+    Every run leaves a printable tick-list in the current directory, named
+    after the device - here .\JLY4F42-InstallList.pdf. Use -OutputPdf to put
+    it somewhere else, or -NoPdf for console output only.
+
+    The PDF is produced by driving Edge (or Chrome) headless - no modules,
+    nothing to install. Set APPFILTER_BROWSER if neither is in its usual place.
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Serial')]
@@ -46,8 +49,11 @@ param(
     [string]$BaselineCsv = ".\BaseImageApps.csv",
     [string]$OutputCsv,
 
-    # Printable tick-list for the bench
-    [string]$OutputPdf
+    # Printable tick-list for the bench. Written to the current directory as
+    # <serial>-InstallList.pdf unless a path is given here or -NoPdf is set.
+    [string]$OutputPdf,
+
+    [switch]$NoPdf
 )
 
 # --- CONFIGURATION -------------------------------------------------
@@ -765,9 +771,22 @@ if ($OutputCsv) {
 # ------------------------------------------------------------------
 #  Optional printable sheet
 # ------------------------------------------------------------------
-if ($OutputPdf) {
+if (-not $NoPdf) {
+
+    $pdfPath = $OutputPdf
+    if (-not $pdfPath) {
+        # Default to something predictable in the working directory, so a plain
+        # run always leaves a sheet behind rather than only console output.
+        $label = @([string]$device.serialNumber, [string]$device.deviceName, 'device' |
+                   Where-Object { $_ -and $_.Trim() })[0].Trim()
+        foreach ($bad in [IO.Path]::GetInvalidFileNameChars()) { $label = $label.Replace($bad, '_') }
+        # Bare name, no ".\" prefix: it resolves against the working directory
+        # either way, and stays a legal filename on non-Windows hosts.
+        $pdfPath = "$label-InstallList.pdf"
+    }
+
     $html = New-InstallSheetHtml -Device $device -Apps $toInstall -ScanAge $scanAge `
                                  -SuppressedCount $excluded.Count -TotalCount $classified.Count
-    $written = Export-InstallSheetPdf -Html $html -Path $OutputPdf
+    $written = Export-InstallSheetPdf -Html $html -Path $pdfPath
     if ($written) { Write-Host "Printable sheet saved to $written" -ForegroundColor Green }
 }

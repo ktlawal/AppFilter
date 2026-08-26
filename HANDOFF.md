@@ -115,9 +115,9 @@ publisher string. Match on `appName`.
 ## Files
 
 - `Get-RefreshAppList.ps1` — main tool. `[-Serial <serial>]` `[-ShowFiltered]`
-  `[-NoPrompt]` `[-OutputCsv <path>]` `[-OutputPdf <path>]`. With no serial and
-  no device name it asks for a serial; an empty answer exits without doing
-  anything.
+  `[-NoPrompt]` `[-OutputCsv <path>]` `[-OutputPdf <path>]` `[-NoPdf]`. With no
+  serial and no device name it asks for a serial; an empty answer exits without
+  doing anything.
 - `BaseImageApps.csv` — exclusion list, columns
   `AppName,Publisher,Source,AddedOn,AddedBy,Serial`
 - `Test-Normalization.ps1` — asserts both normalizers against the name shapes
@@ -261,7 +261,13 @@ the current run's classification is left as it was.
 
 ## Printable sheet
 
-`-OutputPdf <path>` writes a one-page worksheet: device identity across the
+**Every run leaves a sheet behind.** With no `-OutputPdf` the file lands in the
+working directory as `<serial>-InstallList.pdf` (falling back to the device
+name, with invalid filename characters replaced). `-OutputPdf` puts it
+somewhere specific — missing directories are created, a missing `.pdf`
+extension is added — and `-NoPdf` turns it off for a console-only run.
+
+The sheet is a one-page worksheet: device identity across the
 top, then the install list as a tick-box table with a Notes column, and a
 footer giving the install count and how many applications were suppressed. A
 non-active agent or a scan older than 30 days prints as a boxed warning on the
