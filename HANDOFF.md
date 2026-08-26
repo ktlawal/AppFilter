@@ -171,6 +171,15 @@ is a one-word change plus a test case.
 
 Test 3 still matches on the raw name. Version is never compared — name only.
 
+`$NoisePatterns` carries two kinds of entry: the runtime/redistributable
+patterns it started with, and a small group of **helper stubs and
+sub-components** — `Notification Manager for Adobe`, `GoTo Opener` — that
+arrive with a parent product and are never installed on their own. That group
+is the right home for "not base image, but never a manual install"; putting
+such things in `BaseImageApps.csv` would blur what the baseline means.
+`GoTo Opener` deliberately does not match `GoTo` or `GoToMeeting`, which are
+real installs.
+
 ## Current state
 
 The three agreed changes are applied and the baseline has been rebuilt from
@@ -201,8 +210,10 @@ probably upward.
 x86/x64 pair of the same Visual C++ redistributable.
 
 Every row carries its provenance in `Source` — `image-intersection` (62),
-`carried-over` (10), `hand-review-1of2` (3), and `refresh-prompt` for anything
-added from a run. The backfilled rows have no `AddedBy`/`Serial`; we know where
+`carried-over` (10), `hand-review-1of2` (3), `hand-review` for inbox apps
+confirmed by hand off a real run, `name-variant` for a short name Absolute
+reports where the baseline held a longer one, and `refresh-prompt` for anything
+added through the prompt. The backfilled rows have no `AddedBy`/`Serial`; we know where
 they came from but not which operator entered them.
 
 Entries dropped from the old list are the point of the exercise, not a

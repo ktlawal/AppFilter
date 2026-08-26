@@ -86,7 +86,13 @@ $NoisePatterns = @(
     'Microsoft Edge (Update|WebView)',
     'Management Engine',
     'Chipset',
-    'Firmware'
+    'Firmware',
+
+    # Helper stubs and sub-components: they arrive with their parent product,
+    # never as a separate install. 'GoTo Opener' does not match 'GoTo' or
+    # 'GoToMeeting', which are real installs.
+    'Notification Manager for Adobe',
+    'GoTo Opener'
 )
 # -------------------------------------------------------------------
 
