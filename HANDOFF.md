@@ -169,20 +169,20 @@ probably upward.
   Apps for enterprise - en-us` / `Microsoft 365 Copilot` variants, and the two
   Teams add-in entries. The devices being refreshed are old, so old-image inbox
   names still need to match.
-- **minus `Adobe Creative Cloud`**, which the intersection did include. Held
-  out deliberately: it is licensed creative software, i.e. a user install by
-  the tool's own rule, and with n=2 an intersection cannot tell "in the image"
-  apart from "both sampled devices belonged to people who have it". Excluding
-  it would silently cost a designer their Creative Cloud on a refresh. One row
-  to restore if the image really does ship it.
+- plus `7-Zip`, confirmed base image by hand even though **neither** sampled
+  device reported it. Stored as a bare `7-Zip` row: normalization strips the
+  trailing version, so it matches `7-Zip 19.00 (x64 edition)`,
+  `7-Zip 24.09 (x64)` and any future build.
 
-74 rows, 73 distinct keys after normalization; the one collision is the
+`Adobe Creative Cloud` was queried and confirmed as base image, so it stays in.
+
+76 rows, 75 distinct keys after normalization; the one collision is the
 x86/x64 pair of the same Visual C++ redistributable.
 
 Entries dropped from the old list are the point of the exercise, not a
-regression: `Zoom Workplace`, `Webex`, `Cisco AnyConnect`, `7-Zip` and the rest
-came off one user's machine and are not in the image, so they now correctly
-appear as install candidates. Hardware and runtime entries that were dropped
+regression: `Zoom Workplace`, `Webex` and `Cisco AnyConnect` came off one
+user's machine and are not in the image, so they now correctly appear as
+install candidates. Hardware and runtime entries that were dropped
 (`Realtek Card Reader`, the Thunderbolt and Intel utilities, the older Visual
 C++ rows) are still suppressed by `$DriverPublishers` and `$NoisePatterns`.
 
@@ -210,12 +210,15 @@ C++ rows) are still suppressed by `$DriverPublishers` and `$NoisePatterns`.
 
 ## Known caveats
 
-- The baseline now has real provenance but the sample is **2 devices**. An
-  intersection of two cannot distinguish a base-image app from an app both
-  users happened to have (this is exactly why `Adobe Creative Cloud` is held
-  out). Widen the sample when more known-good devices are available; the
-  earlier attempt failed only because freshly-imaged devices had not completed
-  a software scan — sample devices imaged 3-7 days ago instead.
+- The baseline now has real provenance but the sample is **2 devices**, and it
+  misses in both directions. An intersection of two cannot distinguish a
+  base-image app from an app both users happened to have; and `7-Zip` is known
+  base image yet appeared on neither sampled device, so the intersection
+  under-covers as well. Treat the empirical list as a strong starting point
+  that still needs a human pass, not as ground truth. Widen the sample when
+  more known-good devices are available; the earlier attempt failed only
+  because freshly-imaged devices had not completed a software scan — sample
+  devices imaged 3-7 days ago instead.
 - Because Dell and Intel utilities are now in the baseline by name,
   `$DriverPublishers` is carrying much less weight than it was. It is still a
   blunt rule that hides any Dell- or Intel-published application, including
