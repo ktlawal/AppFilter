@@ -106,12 +106,22 @@ publisher string. Match on `appName`.
 - **Error handling**: PS7 exceptions carry `HttpResponseMessage`, which has no
   `GetResponseStream()`. Read the body from `$_.ErrorDetails.Message`; keep
   the 5.1 stream path behind a method-existence check.
+- **Variable names are case-insensitive**: `$driverPublishers = ...` silently
+  overwrites `$DriverPublishers`. This was hit for real — a lookup set built
+  from the config array clobbered the array before the loop read it, and the
+  driver rule matched nothing at all while still looking correct. Give derived
+  variables a distinct name (`$driverPublisherKeys`), not just a different case.
 
 ## Files
 
 - `Get-RefreshAppList.ps1` — main tool. `-Serial <serial>` `[-ShowFiltered]`
-  `[-OutputCsv <path>]`
-- `BaseImageApps.csv` — exclusion list, columns `AppName,Publisher`
+  `[-NoPrompt]` `[-OutputCsv <path>]`
+- `BaseImageApps.csv` — exclusion list, columns
+  `AppName,Publisher,Source,AddedOn,AddedBy,Serial`
+- `Test-Normalization.ps1` — asserts both normalizers against the name shapes
+  Absolute actually returns, and reports baseline rows that collapse to one
+  key. Lifts the functions out with the parser, so it never calls the API.
+  Run it after touching either normalizer.
 - `Build-BaseImageList.ps1` — builds the baseline empirically by intersecting
   the inventories of known base-image devices, and prints an "on some devices"
   bucket for anything short of unanimous. This is now the source of
@@ -138,12 +148,23 @@ A bare trailing integer is deliberately **not** treated as a version, so
 Each application record then runs through three tests **in order**, first match
 wins. An unmatched record goes in the install list.
 
-1. normalized `appName` in `BaseImageApps.csv`   → `Base image`
-2. `appPublisher` in `$DriverPublishers`         → `Driver / OEM`
-3. `appName` matches any regex in `$NoisePatterns` → `Runtime / component`
+1. normalized `appName` in `BaseImageApps.csv`     → `Base image`
+2. normalized `appPublisher` in `$DriverPublishers` → `Driver / OEM`
+3. `appName` matches any regex in `$NoisePatterns`  → `Runtime / component`
 
-Tests 2 and 3 still match on the raw strings, not the normalized key.
-Version is never compared — name only.
+Publishers go through `ConvertTo-NormalizedPublisher`, which strips trademark
+marks and **trailing** corporate suffixes (`Inc.`, `Corp.`, `Technologies`,
+`Software`, `Semiconductor`, `Systems`, …) and lowercases. So `Dell`,
+`Dell Inc.` and `Dell Technologies` all reach `dell` and one list entry per
+company is enough. Suffixes come off the end only, so `Advanced Micro Devices`
+and `Alps Electric` keep their distinguishing words.
+
+This fixed a live gap: the old list matched `appPublisher` exactly, and
+`Dell Technologies` was not in it — `Dell Optimizer` and `Dell Trusted Device`
+were escaping the driver rule entirely and were only suppressed because they
+happened to be in the baseline by name.
+
+Test 3 still matches on the raw name. Version is never compared — name only.
 
 ## Current state
 
@@ -174,6 +195,11 @@ probably upward.
 75 rows, 74 distinct keys after normalization; the one collision is the
 x86/x64 pair of the same Visual C++ redistributable.
 
+Every row carries its provenance in `Source` — `image-intersection` (62),
+`carried-over` (10), `hand-review-1of2` (3), and `refresh-prompt` for anything
+added from a run. The backfilled rows have no `AddedBy`/`Serial`; we know where
+they came from but not which operator entered them.
+
 Entries dropped from the old list are the point of the exercise, not a
 regression: `Zoom Workplace`, `Webex`, `Cisco AnyConnect` and `7-Zip` came off
 one user's machine and are not in the image, so they now correctly appear as
@@ -202,6 +228,34 @@ C++ rows) are still suppressed by `$DriverPublishers` and `$NoisePatterns`.
    x86/x64 pairs of the same Visual C++ redistributables plus the deliberate
    `Tanium Client` / `Tanium Client 7.8.1.3126` pair — harmless, the baseline
    is a set.
+
+## Curating the baseline from a run
+
+The install list is numbered, and unless `-NoPrompt` is given the script asks
+whether any of it belongs in the baseline:
+
+```
+Add any of these to the base image list? [numbers / n]: 1,4
+```
+
+Accepts single numbers, comma lists and ranges (`1-3`); anything unparseable or
+out of range is reported and dropped rather than guessed at. The selection is
+echoed for confirmation before anything is written, and where a row's
+normalized key is broader than the name on screen the confirmation says so:
+
+```
+    [1] 7-Zip 24.09 (x64 edition)  (Igor Pavlov)
+         -> matches "7-zip" (all versions)
+```
+
+That line matters — one keystroke there suppresses every version of a product,
+which is usually the intent but is worth seeing first. Answering anything but
+`y` writes nothing, and an empty answer (no stdin, redirected output) skips the
+prompt entirely rather than hanging.
+
+Rows added this way carry `Source=refresh-prompt` along with the date, the
+operator and the serial that prompted them. Additions affect the **next** run;
+the current run's classification is left as it was.
 
 ## Known caveats
 

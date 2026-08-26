@@ -7,11 +7,18 @@
     removes anything in the base image, suppresses drivers and runtimes,
     and reports what is left.
 
+    The install list is numbered, and unless -NoPrompt is given you are asked
+    whether any of it belongs in the baseline. Anything you pick is appended to
+    the baseline CSV with provenance, so the next refresh filters it.
+
 .EXAMPLE
     .\Get-RefreshAppList.ps1 -Serial JLY4F42
 
 .EXAMPLE
     .\Get-RefreshAppList.ps1 -Serial JLY4F42 -ShowFiltered
+
+.EXAMPLE
+    .\Get-RefreshAppList.ps1 -Serial JLY4F42 -NoPrompt -OutputCsv .\JLY4F42.csv
 #>
 
 [CmdletBinding()]
@@ -24,6 +31,9 @@ param(
 
     # Also show what was filtered out and why
     [switch]$ShowFiltered,
+
+    # Skip the "add these to the baseline?" prompt and never touch the CSV
+    [switch]$NoPrompt,
 
     [string]$BaselineCsv = ".\BaseImageApps.csv",
     [string]$OutputCsv
@@ -39,10 +49,11 @@ $PageSize  = 500
 
 # --- NOISE SUPPRESSION RULES ---------------------------------------
 # Publishers whose software arrives with the hardware or the image.
+# Compared through ConvertTo-NormalizedPublisher, so one entry per company is
+# enough - 'Dell', 'Dell Inc.' and 'Dell Technologies' all reduce to 'dell'.
 $DriverPublishers = @(
-    'Intel', 'INTEL', 'Realtek Semiconductor', 'Realtek', 'Dell', 'Dell Inc.',
-    'NVIDIA', 'Advanced Micro Devices', 'AMD', 'Synaptics', 'Conexant',
-    'Broadcom', 'Qualcomm', 'ELAN', 'Alps Electric'
+    'Intel', 'Realtek', 'Dell', 'NVIDIA', 'Advanced Micro Devices', 'AMD',
+    'Synaptics', 'Conexant', 'Broadcom', 'Qualcomm', 'ELAN', 'Alps Electric'
 )
 
 # Name patterns that are never a manual install.
@@ -100,6 +111,121 @@ function ConvertTo-NormalizedAppName {
 
     # Collapse whitespace, lowercase
     ($n -replace '\s+', ' ').Trim().ToLowerInvariant()
+}
+
+function ConvertTo-NormalizedPublisher {
+    <#
+        Reduces a publisher to a comparable key, so the driver list needs one
+        entry per company instead of one per spelling.
+
+            'Dell' / 'Dell Inc.' / 'Dell Technologies'  -> 'dell'
+            'Realtek Semiconductor'                     -> 'realtek'
+            'INTEL' / 'Intel Corporation'               -> 'intel'
+
+        Suffixes are only stripped from the END of the name, so a company whose
+        name genuinely contains one of these words mid-string is left alone.
+    #>
+    param([string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) { return '' }
+
+    $n = $Name -replace '[\u2122\u00AE\u00A9]', ' '
+    $n = $n -replace '[,\.]', ' '
+    $n = ($n -replace '\s+', ' ').Trim()
+
+    $suffix = '(incorporated|inc|corporation|corp|company|co|limited|ltd|llc|gmbh|technologies|technology|software|semiconductor|systems|electronics|group|holdings)'
+    while ($n -match "\s$suffix\s*$") {
+        $n = ($n -replace "\s$suffix\s*$", '').Trim()
+    }
+
+    $n.ToLowerInvariant()
+}
+
+function Read-IndexSelection {
+    <#
+        Turns "1,4" / "1-3" / "2 5 7-9" into a sorted, de-duplicated list of
+        valid 1-based indexes. Anything unparseable or out of range is reported
+        and dropped rather than guessed at.
+    #>
+    param(
+        [string]$Response,
+        [Parameter(Mandatory)][int]$Max
+    )
+
+    $picked = [System.Collections.Generic.SortedSet[int]]::new()
+
+    foreach ($token in @($Response -split '[,\s]+' | Where-Object { $_ })) {
+        if ($token -match '^(\d+)\s*[-\u2013]\s*(\d+)$') {
+            $lo = [int]$Matches[1]; $hi = [int]$Matches[2]
+            if ($lo -gt $hi) { $t = $lo; $lo = $hi; $hi = $t }
+            for ($i = $lo; $i -le $hi; $i++) {
+                if ($i -ge 1 -and $i -le $Max) { [void]$picked.Add($i) }
+                else { Write-Warning "No item [$i] on the list - ignored." }
+            }
+        }
+        elseif ($token -match '^\d+$') {
+            $i = [int]$token
+            if ($i -ge 1 -and $i -le $Max) { [void]$picked.Add($i) }
+            else { Write-Warning "No item [$i] on the list - ignored." }
+        }
+        else {
+            Write-Warning "Could not read '$token' as a number or range - ignored."
+        }
+    }
+
+    # Unrolls to ints; callers wrap in @() per the usual PowerShell hazard.
+    return $picked
+}
+
+function Add-BaselineEntry {
+    <#
+        Appends chosen applications to the baseline CSV, carrying provenance so
+        a later reader can tell why a row is there. Rewrites the whole file to
+        keep it sorted and single-shaped.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][object[]]$Apps,
+        [string]$Serial
+    )
+
+    $existing = @(Import-Csv $Path)
+
+    $keys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in $existing) {
+        $k = ConvertTo-NormalizedAppName $row.AppName
+        if ($k) { [void]$keys.Add($k) }
+    }
+
+    $stamp = (Get-Date).ToString('yyyy-MM-dd')
+    $added = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($app in $Apps) {
+        $k = ConvertTo-NormalizedAppName $app.AppName
+        if (-not $k) { continue }
+        if ($keys.Contains($k)) {
+            Write-Warning "'$($app.AppName)' already matches a baseline entry - skipped."
+            continue
+        }
+        [void]$keys.Add($k)
+        $added.Add([pscustomobject]@{
+            AppName   = $app.AppName
+            Publisher = $app.Publisher
+            Source    = 'refresh-prompt'
+            AddedOn   = $stamp
+            AddedBy   = $env:USERNAME
+            Serial    = $Serial
+        })
+    }
+
+    if ($added.Count -eq 0) { return 0 }
+
+    $all = @(@($existing) + @($added)) |
+        Select-Object AppName, Publisher, Source, AddedOn, AddedBy, Serial |
+        Sort-Object { $_.AppName.ToLowerInvariant() }
+
+    $all | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
+    return $added.Count
 }
 
 function ConvertTo-Base64Url {
@@ -206,6 +332,17 @@ foreach ($row in (Import-Csv $BaselineCsv)) {
 }
 Write-Verbose "Baseline holds $($baseline.Count) normalized application name(s)."
 
+# NOTE: PowerShell variable names are case-insensitive, so this set must NOT
+# be called $driverPublishers - it would overwrite the $DriverPublishers array
+# above before the loop below had read it, leaving the driver rule matching
+# nothing at all.
+$driverPublisherKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($publisher in $DriverPublishers) {
+    $k = ConvertTo-NormalizedPublisher $publisher
+    if ($k) { [void]$driverPublisherKeys.Add($k) }
+}
+Write-Verbose "Driver publisher rule holds $($driverPublisherKeys.Count) normalized publisher(s)."
+
 
 # ------------------------------------------------------------------
 #  Find the device
@@ -255,7 +392,7 @@ $classified = foreach ($a in $apps) {
     if ($key -and $baseline.Contains($key)) {
         $reason = 'Base image'
     }
-    elseif ($a.appPublisher -and ($DriverPublishers -contains $a.appPublisher.Trim())) {
+    elseif ($a.appPublisher -and $driverPublisherKeys.Contains((ConvertTo-NormalizedPublisher ([string]$a.appPublisher)))) {
         $reason = 'Driver / OEM'
     }
     else {
@@ -276,6 +413,9 @@ $classified = foreach ($a in $apps) {
 }
 
 $toInstall = @($classified | Where-Object { -not $_.Excluded } | Sort-Object AppName)
+for ($i = 0; $i -lt $toInstall.Count; $i++) {
+    $toInstall[$i] | Add-Member -NotePropertyName Index -NotePropertyValue ($i + 1) -Force
+}
 $excluded  = @($classified | Where-Object { $_.Excluded })
 
 
@@ -307,9 +447,60 @@ Write-Host ""
 if ($toInstall.Count -eq 0) {
     Write-Host "    Nothing beyond the base image." -ForegroundColor DarkGray
 } else {
-    $toInstall | Format-Table @{ n = 'Application'; e = { $_.AppName }; width = 45 },
-                              @{ n = 'Version';    e = { $_.Version }; width = 20 },
-                              @{ n = 'Publisher';  e = { $_.Publisher } }
+    $toInstall | Format-Table @{ n = '#';           e = { "[$($_.Index)]" }; width = 5 },
+                              @{ n = 'Application'; e = { $_.AppName };      width = 45 },
+                              @{ n = 'Version';     e = { $_.Version };      width = 20 },
+                              @{ n = 'Publisher';   e = { $_.Publisher } }
+}
+
+# ------------------------------------------------------------------
+#  Offer to fold any of it into the baseline
+# ------------------------------------------------------------------
+if (-not $NoPrompt -and $toInstall.Count -gt 0) {
+
+    Write-Host ""
+    $answer = Read-Host "Add any of these to the base image list? [numbers / n]"
+
+    if ($answer -and $answer.Trim() -notmatch '^(n|no)$') {
+
+        $picked = @(Read-IndexSelection -Response $answer -Max $toInstall.Count)
+
+        if ($picked.Count -eq 0) {
+            Write-Host "  Nothing selected." -ForegroundColor DarkGray
+        }
+        else {
+            $chosen = @($picked | ForEach-Object { $toInstall[$_ - 1] })
+
+            Write-Host ""
+            Write-Host "  Adding to $BaselineCsv :"
+            foreach ($c in $chosen) {
+                Write-Host ("    [{0}] {1}  ({2})" -f $c.Index, $c.AppName, $c.Publisher)
+
+                # A name row is matched on its normalized key, which can be
+                # broader than the name on screen. Say so before writing it.
+                $key = ConvertTo-NormalizedAppName $c.AppName
+                if ($key -ne ([string]$c.AppName).Trim().ToLowerInvariant()) {
+                    Write-Host ("         -> matches `"$key`" (all versions)") -ForegroundColor DarkGray
+                }
+            }
+
+            Write-Host ""
+            $confirm = Read-Host "Confirm? [y/N]"
+
+            if ($confirm -match '^(y|yes)$') {
+                $count = Add-BaselineEntry -Path $BaselineCsv -Apps $chosen -Serial $device.serialNumber
+                if ($count -gt 0) {
+                    Write-Host "  Added $count row(s). They will be filtered from the next run." -ForegroundColor Green
+                } else {
+                    Write-Host "  Nothing added." -ForegroundColor DarkGray
+                }
+            }
+            else {
+                Write-Host "  Nothing added." -ForegroundColor DarkGray
+            }
+        }
+    }
+    Write-Host ""
 }
 
 Write-Host "  Filtered out: $($excluded.Count) of $($classified.Count) inventoried applications." -ForegroundColor DarkGray
