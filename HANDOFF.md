@@ -112,9 +112,11 @@ publisher string. Match on `appName`.
 - `Get-RefreshAppList.ps1` — main tool. `-Serial <serial>` `[-ShowFiltered]`
   `[-OutputCsv <path>]`
 - `BaseImageApps.csv` — exclusion list, columns `AppName,Publisher`
-- `Build-BaseImageList.ps1` — builds a baseline empirically from several
-  freshly-imaged devices (not currently in use; the baseline is hand-curated).
-  Not carried into this repo yet; it still lives only in `D:\AbsoluteApplicationList`.
+- `Build-BaseImageList.ps1` — builds the baseline empirically by intersecting
+  the inventories of known base-image devices, and prints an "on some devices"
+  bucket for anything short of unanimous. This is now the source of
+  `BaseImageApps.csv`. Not carried into this repo yet; it still lives only in
+  `D:\AbsoluteApplicationList`.
 
 ## How classification works
 
@@ -145,11 +147,44 @@ Version is never compared — name only.
 
 ## Current state
 
-The three agreed changes below are applied and the script parses clean; a run
-against a mocked API confirms the intended classification. It has **not** been
-re-run against a live serial since the changes — the last real run predates
-them (serial `4QXTTHR3`: 75 apps, 58 excluded, 17 install candidates), so
-expect that count to move.
+The three agreed changes are applied and the baseline has been rebuilt from
+real base-image devices. The script parses clean and a run against a mocked API
+confirms the intended classification. It has **not** been re-run against a live
+serial since — the last real run predates all of this (serial `4QXTTHR3`:
+75 apps, 58 excluded, 17 install candidates), so expect that count to move,
+probably upward.
+
+## Baseline provenance
+
+`BaseImageApps.csv` is no longer hand-curated. It is now:
+
+- the **intersection of 2 known base-image devices** (61 apps on 2/2), from
+  `Build-BaseImageList.ps1`
+- plus `Dell Trusted Device`, `Feedback Hub` and `Terugvoer-spil`, which landed
+  in that tool's 1/2 "review these" bucket and were judged base image by hand
+- plus 12 names carried over from the old hand-curated list: inbox Store apps
+  and product name variants the two sampled devices did not report — `Camera`
+  and `Microsoft Store` (the sample says `Windows Camera` / `Windows Store`),
+  `Maps`, `3D Viewer`, `Paint 3D`, `OneNote for Windows 10`, the `Microsoft 365
+  Apps for enterprise - en-us` / `Microsoft 365 Copilot` variants, and the two
+  Teams add-in entries. The devices being refreshed are old, so old-image inbox
+  names still need to match.
+- **minus `Adobe Creative Cloud`**, which the intersection did include. Held
+  out deliberately: it is licensed creative software, i.e. a user install by
+  the tool's own rule, and with n=2 an intersection cannot tell "in the image"
+  apart from "both sampled devices belonged to people who have it". Excluding
+  it would silently cost a designer their Creative Cloud on a refresh. One row
+  to restore if the image really does ship it.
+
+74 rows, 73 distinct keys after normalization; the one collision is the
+x86/x64 pair of the same Visual C++ redistributable.
+
+Entries dropped from the old list are the point of the exercise, not a
+regression: `Zoom Workplace`, `Webex`, `Cisco AnyConnect`, `7-Zip` and the rest
+came off one user's machine and are not in the image, so they now correctly
+appear as install candidates. Hardware and runtime entries that were dropped
+(`Realtek Card Reader`, the Thunderbolt and Intel utilities, the older Visual
+C++ rows) are still suppressed by `$DriverPublishers` and `$NoisePatterns`.
 
 ## Applied changes
 
@@ -175,10 +210,16 @@ expect that count to move.
 
 ## Known caveats
 
-- The baseline was hand-curated from a single user's device rather than a clean
-  image, so it may both over- and under-exclude. `Build-BaseImageList.ps1`
-  exists to rebuild it empirically; the three freshly-imaged devices tried so
-  far returned only 1 app each because the software scan hadn't completed.
+- The baseline now has real provenance but the sample is **2 devices**. An
+  intersection of two cannot distinguish a base-image app from an app both
+  users happened to have (this is exactly why `Adobe Creative Cloud` is held
+  out). Widen the sample when more known-good devices are available; the
+  earlier attempt failed only because freshly-imaged devices had not completed
+  a software scan — sample devices imaged 3-7 days ago instead.
+- Because Dell and Intel utilities are now in the baseline by name,
+  `$DriverPublishers` is carrying much less weight than it was. It is still a
+  blunt rule that hides any Dell- or Intel-published application, including
+  real ones; narrowing it is now much safer than it used to be.
 - Check `agentStatus` and `lastScanDateTimeUtc` before trusting an inventory.
   A disabled or long-disconnected agent yields stale or empty results.
 - Store app display names can arrive localized, so a single baseline entry may

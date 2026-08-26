@@ -1,76 +1,75 @@
-AppName,Publisher
-Microsoft Teams,Microsoft
-BitLocker Drive Encryption Driver,Microsoft
-News,Microsoft
-Microsoft Defender ATP,Microsoft
-CyberArk Endpoint Privilege Manager Agent,CyberArk Software
-Realtek Audio Driver,Realtek Semiconductor
-Microsoft Store,Microsoft
-Microsoft 365 Copilot,Microsoft
-Clock,Microsoft
-Snipping Tool,Microsoft
-Microsoft Clipchamp,Microsoft
-Microsoft Visual C++ v14 Redistributable (x86) - 14.50.35719,Microsoft
-Local Administrator Password Solution,Microsoft
-Microsoft Visual C++ 2012 Redistributable (x64) - 11.0.61030,Microsoft
-Terminal,Microsoft
-Photos,Microsoft
-Microsoft 365 Apps for enterprise - en-us,Microsoft
-Intel® Graphics Command Center,INTEL
-Camera,Microsoft
-Windows Security,Microsoft
-Realtek Card Reader,Realtek Semiconductor
-Thunderbolt™ Software,Intel
-Windows Defender Advanced Threat Protection Service,Microsoft
-Intel(R) Management Engine Components,Intel
-Absolute Secure Access Client,Absolute Software
-Printer Installer Client,PrinterLogic
-Microsoft OneDrive,Microsoft
-Microsoft Intune Management Extension,Microsoft
-Windows Update,Microsoft
-Quick Assist,Microsoft
-Calculator,Microsoft
-Copilot,Microsoft
-Maps,Microsoft
-Microsoft Teams Meeting Add-in for Microsoft Office,Microsoft
-Sound Recorder,Microsoft
-Configuration Manager Client,Microsoft
-Notepad,Microsoft
-Microsoft Visual C++ 2012 Redistributable (x86) - 11.0.61030,Microsoft
-Webex,Cisco Systems
-OneNote for Windows 10,Microsoft
-Cisco AnyConnect Diagnostics and Reporting Tool,Cisco Systems
-Sticky Notes,Microsoft
-Google Chrome,Google
-7-Zip 19.00 (x64 edition),Igor Pavlov
-Intel® Optane™ Memory and Storage Management,INTEL
-Tanium Client 7.8.1.3126,Tanium
-Dell Peripheral Manager,Dell
-Zoom Workplace,Zoom Communications
-Company Portal,Microsoft
-Microsoft Update Health Tools,Microsoft
-3D Viewer,Microsoft
-Paint 3D,Microsoft
-XBOX,Microsoft
-Outlook,Microsoft
-Windows Defender,Microsoft
-Intel(R) Serial IO,Intel
-Teams Machine-Wide Installer,Microsoft
-Microsoft Intune,Microsoft
-Microsoft Visual C++ 2013 Redistributable (x64) - 12.0.40664,Microsoft
-Microsoft Visual C++ v14 Redistributable (x64) - 14.50.35719,Microsoft
-Paint,Microsoft
-Get Help,Microsoft
-Microsoft Visual C++ 2013 Redistributable (x86) - 12.0.40664,Microsoft
-Microsoft Edge,Microsoft
-Thunderbolt™ Control Center,INTEL
-Weather,Microsoft
-BitLocker Drive Encryption,Microsoft
-Microsoft 365,Microsoft
-Tanium Client,Tanium
-Windows Camera,Microsoft
-Windows Store,Microsoft
-To Do,Microsoft
-Family,Microsoft
-Feedback Hub,Microsoft
-Terugvoer-spil,Microsoft
+"AppName","Publisher"
+"Absolute Secure Access Client","Absolute Software"
+"BitLocker Drive Encryption","Microsoft"
+"Calculator","Microsoft"
+"Clock","Microsoft"
+"Company Portal","Microsoft"
+"Configuration Manager Client","Microsoft"
+"Copilot","Microsoft"
+"CyberArk Endpoint Privilege Manager Agent","CyberArk Software"
+"Dell Command | Update","Dell"
+"Dell Core Services","Dell"
+"Dell Optimizer","Dell Technologies"
+"Dell Pair","Dell"
+"Dell SupportAssist","Dell"
+"Dell SupportAssist OS Recovery Plugin for Dell Update","Dell"
+"Dell SupportAssist Remediation","Dell"
+"Dev Home","Microsoft"
+"Family","Microsoft"
+"Get Help","Microsoft"
+"Google Chrome","Google"
+"Intel Graphics Software","Intel"
+"Intel Graphics Software & Drivers","Intel"
+"Intel Management and Security Status","INTEL"
+"Intel Rapid Storage Technology Application","INTEL"
+"Local Administrator Password Solution","Microsoft"
+"Microsoft 365","Microsoft"
+"Microsoft ASP.NET Core 8.0 (x64)","Microsoft"
+"Microsoft Clipchamp","Microsoft"
+"Microsoft Defender ATP","Microsoft"
+"Microsoft Edge","Microsoft"
+"Microsoft Intune","Microsoft"
+"Microsoft Intune Management Extension","Microsoft"
+"Microsoft OneDrive","Microsoft"
+"Microsoft OneNote","Microsoft"
+"Microsoft SQL Server","Microsoft"
+"Microsoft Teams","Microsoft"
+"Microsoft Visual C++ 2015-2022 Redistributable (x64)","Microsoft"
+"Microsoft Visual C++ 2015-2022 Redistributable (x86)","Microsoft"
+"Microsoft Windows Desktop Runtime","Microsoft"
+"News","Microsoft"
+"Notepad","Microsoft"
+"Outlook","Microsoft"
+"Paint","Microsoft"
+"Photos","Microsoft"
+"Power Automate Desktop","Microsoft"
+"Printer Installer Client","PrinterLogic"
+"Quick Assist","Microsoft"
+"Realtek Audio Driver","Realtek Semiconductor"
+"Snipping Tool","Microsoft"
+"Sound Recorder","Microsoft"
+"Sticky Notes","Microsoft"
+"Tanium Client","Tanium"
+"Terminal","Microsoft"
+"To Do","Microsoft"
+"Weather","Microsoft"
+"Windows Camera","Microsoft"
+"Windows Defender","Microsoft"
+"Windows Defender Advanced Threat Protection Service","Microsoft"
+"Windows Security","Microsoft"
+"Windows Store","Microsoft"
+"Windows Update","Microsoft"
+"Xbox","Microsoft"
+"Camera","Microsoft"
+"Microsoft Store","Microsoft"
+"Feedback Hub","Microsoft"
+"Terugvoer-spil","Microsoft"
+"Maps","Microsoft"
+"3D Viewer","Microsoft"
+"Paint 3D","Microsoft"
+"OneNote for Windows 10","Microsoft"
+"Microsoft 365 Apps for enterprise - en-us","Microsoft"
+"Microsoft 365 Copilot","Microsoft"
+"Teams Machine-Wide Installer","Microsoft"
+"Microsoft Teams Meeting Add-in for Microsoft Office","Microsoft"
+"Dell Trusted Device","Dell Technologies"
