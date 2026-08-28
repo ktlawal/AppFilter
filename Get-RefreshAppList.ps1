@@ -55,10 +55,14 @@ param(
 )
 
 # --- CONFIGURATION -------------------------------------------------
-$TokenId   = "TOKEN HERE"
-$SecretKey = "KEY HERE"
 $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
+
+# No credentials here, deliberately. They are loaded per-user at run time by
+# Get-AbsoluteCredential below, from a DPAPI-protected file written once by
+# Set-AbsoluteCredential.ps1. That keeps this file safe to sign, share,
+# screen-share and commit.
+$CredentialPath = $null   # override for testing; $null resolves to APPDATA
 # -------------------------------------------------------------------
 
 
@@ -94,6 +98,67 @@ $NoisePatterns = @(
 )
 # -------------------------------------------------------------------
 
+
+function Get-AbsoluteCredential {
+    <#
+        Returns the token ID and secret for this run.
+
+        Environment variables win, so a server, container or scheduled context
+        can inject them without a file. Otherwise the DPAPI-protected file
+        written by Set-AbsoluteCredential.ps1 is used - it decrypts only for
+        the Windows account that created it, on the machine that created it.
+    #>
+    param([string]$Path)
+
+    if ($env:ABSOLUTE_TOKEN_ID -and $env:ABSOLUTE_SECRET_KEY) {
+        return [pscustomobject]@{
+            TokenId   = $env:ABSOLUTE_TOKEN_ID
+            SecretKey = $env:ABSOLUTE_SECRET_KEY
+            Source    = 'environment'
+        }
+    }
+
+    if (-not $Path) {
+        if (-not $env:APPDATA) {
+            throw "No credential in the environment, and APPDATA is not set so the default location cannot be resolved."
+        }
+        $Path = Join-Path $env:APPDATA 'AppFilter\absolute.cred.xml'
+    }
+
+    if (-not (Test-Path $Path)) {
+        throw @"
+No Absolute credential found.
+
+Run the one-time setup first:
+
+    .\Set-AbsoluteCredential.ps1
+
+It stores your token under your own Windows profile, encrypted so that only
+you on this machine can read it. Alternatively set ABSOLUTE_TOKEN_ID and
+ABSOLUTE_SECRET_KEY in the environment.
+"@
+    }
+
+    try {
+        $cred = Import-Clixml -Path $Path -ErrorAction Stop
+    }
+    catch {
+        # Two causes look the same from here: a file copied from another
+        # machine or profile (DPAPI refuses it - which is the point), or a
+        # corrupt file. Name both rather than asserting the wrong one.
+        throw "Could not read the stored credential at $Path. If it was copied from another machine or user profile it cannot be decrypted here; it may also be corrupt. Re-run .\Set-AbsoluteCredential.ps1 on this machine. ($($_.Exception.Message))"
+    }
+
+    if ($cred -isnot [System.Management.Automation.PSCredential]) {
+        throw "$Path is not a stored credential. Re-run .\Set-AbsoluteCredential.ps1."
+    }
+
+    [pscustomobject]@{
+        TokenId   = $cred.UserName
+        SecretKey = $cred.GetNetworkCredential().Password
+        Source    = $Path
+    }
+}
 
 function ConvertTo-NormalizedAppName {
     <#
@@ -537,6 +602,16 @@ function Save-InstallSheet {
         return $null
     }
 }
+
+# ------------------------------------------------------------------
+#  Credentials
+# ------------------------------------------------------------------
+# Fail here, before the operator is asked to type anything.
+$credential = Get-AbsoluteCredential -Path $CredentialPath
+$TokenId    = $credential.TokenId
+$SecretKey  = $credential.SecretKey
+Write-Verbose "Credential loaded from $($credential.Source)."
+
 
 # ------------------------------------------------------------------
 #  Ask for a device if none was supplied

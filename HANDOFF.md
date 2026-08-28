@@ -14,7 +14,42 @@ installs (Intune group membership) is a possible later phase.
 
 - Windows, PowerShell 7 (NOT 5.1 — error handling differs, see gotchas)
 - Working dir: `D:\AbsoluteApplicationList`
-- Absolute API token ID + secret are pasted into the top of each script
+- Absolute API token ID + secret are **not** in any script. Each operator
+  stores their own once with `Set-AbsoluteCredential.ps1`; see Credentials.
+
+## Credentials
+
+Nothing sensitive lives in the repo. `Get-RefreshAppList.ps1` resolves the
+token at run time, in this order:
+
+1. `ABSOLUTE_TOKEN_ID` + `ABSOLUTE_SECRET_KEY` environment variables, if both
+   are set — this is the hook a server, container or scheduled task uses
+2. otherwise `%APPDATA%\AppFilter\absolute.cred.xml`, written once per person
+   per machine by `Set-AbsoluteCredential.ps1`
+
+The file is a `PSCredential` exported with `Export-Clixml`, so the secret is
+encrypted with **DPAPI under the current user**. Copy it to another machine,
+another profile, or a USB stick and it will not decrypt. The token ID is stored
+readable, which is fine — it is useless without the secret.
+
+**`Set-AbsoluteCredential.ps1` refuses to run on non-Windows, deliberately.**
+DPAPI is a Windows facility; elsewhere PowerShell still writes the file, but
+the "encrypted" password is only UTF-16 hex of the plaintext — any local user
+recovers it with a single `Import-Clixml`. Writing that would look protected
+and would not be, so the script errors instead.
+
+What this does and does not buy you:
+
+- **Does**: a leaked, copied or emailed credential file is inert. A stolen
+  powered-off laptop yields nothing. The script is safe to sign, share,
+  screen-share and commit.
+- **Does not**: stop malware running as that user, stop a domain admin (DPAPI
+  master keys are escrowed to the DC), give central revocation, give per-person
+  audit, or apply MFA and conditional access. Those need the credential to move
+  off the endpoint entirely — see the broker sketch under Possible next steps.
+
+Pair it with per-person read-only tokens and an expiry date; that is what makes
+revocation and attribution work at all.
 
 ## Absolute API — verified facts
 
@@ -120,6 +155,8 @@ publisher string. Match on `appName`.
   without doing anything.
 - `BaseImageApps.csv` — exclusion list, columns
   `AppName,Publisher,Source,AddedOn,AddedBy,Serial`
+- `Set-AbsoluteCredential.ps1` — one-time per-user credential setup.
+  `[-Path <path>]` `[-Remove]`. Windows only, by design.
 - `Test-Normalization.ps1` — asserts both normalizers against the name shapes
   Absolute actually returns, and reports baseline rows that collapse to one
   key. Lifts the functions out with the parser, so it never calls the API.
