@@ -150,17 +150,21 @@ publisher string. Match on `appName`.
 ## Files
 
 - `Get-RefreshAppList.ps1` — main tool. `[-Serial <serial>]` `[-ShowFiltered]`
-  `[-NoPrompt]` `[-OutputCsv <path>]` `[-OutputHtml <path>]` `[-NoSheet]`. With
-  no serial and no device name it asks for a serial; an empty answer exits
-  without doing anything.
-- `BaseImageApps.csv` — exclusion list, columns
-  `AppName,Publisher,Source,AddedOn,AddedBy,Serial`
+  `[-NoPrompt]` `[-RulesCsv <path>]` `[-OutputCsv <path>]` `[-OutputHtml <path>]`
+  `[-NoSheet]`. With no serial and no device name it asks for a serial; an
+  empty answer exits without doing anything. `-BaselineCsv` still works as an
+  alias for `-RulesCsv`.
+- `AppRules.csv` — **all** suppression rules, columns
+  `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
+  Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
+  in the script.
 - `Set-AbsoluteCredential.ps1` — one-time per-user credential setup.
   `[-Path <path>]` `[-Remove]`. Windows only, by design.
-- `Test-Normalization.ps1` — asserts both normalizers against the name shapes
-  Absolute actually returns, and reports baseline rows that collapse to one
-  key. Lifts the functions out with the parser, so it never calls the API.
-  Run it after touching either normalizer.
+- `Test-AppFilter.ps1` — asserts both normalizers, loads the rules file, and
+  classifies two real device inventories against the bucket a human confirmed
+  for each. Lifts the functions out with the parser, so it never calls the API
+  and needs no credential. **Run it after touching a normalizer or the rules
+  file** — the classification cases are the regression net.
 - `Build-BaseImageList.ps1` — builds the baseline empirically by intersecting
   the inventories of known base-image devices, and prints an "on some devices"
   bucket for anything short of unanimous. This is now the source of
@@ -169,9 +173,26 @@ publisher string. Match on `appName`.
 
 ## How classification works
 
-Both sides of the baseline comparison are put through
-`ConvertTo-NormalizedAppName` first, so a product matches itself across
-machines despite version drift:
+Every rule lives in `AppRules.csv`, one per row, distinguished by `MatchType`:
+
+| MatchType | Matched against | Example rule | Reason |
+|---|---|---|---|
+| `Name` | normalized `appName` | `Microsoft Teams` | Base image |
+| `Publisher` | normalized `appPublisher` | `Dell` | Driver / OEM |
+| `Pattern` | raw `appName`, as a regex | `Visual C\+\+` | Runtime / component |
+
+`Active` set to anything but `Yes` retires a rule without losing its history.
+A `Pattern` row that is not a valid regex is reported and skipped rather than
+blowing up mid-run against a real device.
+
+The `Reason` travels with the rule, so what a match is *called* is data too.
+The **order** the three kinds are tried in stays in code, because that ordering
+is the classifier's meaning rather than a preference: a named product beats its
+vendor, and a vendor beats a generic pattern. First match wins; anything
+unmatched is an install candidate.
+
+Both sides of a `Name` comparison go through `ConvertTo-NormalizedAppName`, so
+a product matches itself across machines despite version drift:
 
 - strips `™ ® ©`
 - strips architecture / edition parentheticals — `(x64)`, `(x86 edition)`,
@@ -184,38 +205,27 @@ machines despite version drift:
 A bare trailing integer is deliberately **not** treated as a version, so
 `Microsoft 365`, `Paint 3D` and `OneNote for Windows 10` keep their numbers.
 
-Each application record then runs through three tests **in order**, first match
-wins. An unmatched record goes in the install list.
+`Publisher` rules go through `ConvertTo-NormalizedPublisher`, which strips
+trademark marks and **trailing** corporate suffixes (`Inc.`, `Corp.`,
+`Technologies`, `Software`, `Semiconductor`, `Systems`, `Products`, …) and
+lowercases. So `Dell`, `Dell Inc.`, `Dell Technologies` and `Dell Products` all
+reach `dell` and one row per company is enough. Suffixes come off the end only,
+so `Advanced Micro Devices` and `Alps Electric` keep their distinguishing
+words.
 
-1. normalized `appName` in `BaseImageApps.csv`     → `Base image`
-2. normalized `appPublisher` in `$DriverPublishers` → `Driver / OEM`
-3. `appName` matches any regex in `$NoisePatterns`  → `Runtime / component`
+That normalization fixed two live gaps found on real runs: `Dell Technologies`
+(on `Dell Optimizer`, `Dell Trusted Device`) and `Dell Products` (on
+`Dell Digital Delivery`) were both escaping the driver rule under the old
+exact-match list. Expect to add a suffix occasionally — a one-word change plus
+a test case.
 
-Publishers go through `ConvertTo-NormalizedPublisher`, which strips trademark
-marks and **trailing** corporate suffixes (`Inc.`, `Corp.`, `Technologies`,
-`Software`, `Semiconductor`, `Systems`, …) and lowercases. So `Dell`,
-`Dell Inc.` and `Dell Technologies` all reach `dell` and one list entry per
-company is enough. Suffixes come off the end only, so `Advanced Micro Devices`
-and `Alps Electric` keep their distinguishing words.
+Version is never compared — name only.
 
-This fixed a live gap: the old list matched `appPublisher` exactly, and
-`Dell Technologies` was not in it — `Dell Optimizer` and `Dell Trusted Device`
-were escaping the driver rule entirely and were only suppressed because they
-happened to be in the baseline by name. A later real run turned up
-`Dell Products` (on `Dell Digital Delivery`) the same way, which is why
-`products` is in the suffix list. Expect to add a suffix occasionally; each one
-is a one-word change plus a test case.
-
-Test 3 still matches on the raw name. Version is never compared — name only.
-
-`$NoisePatterns` carries two kinds of entry: the runtime/redistributable
-patterns it started with, and a small group of **helper stubs and
-sub-components** — `Notification Manager for Adobe`, `GoTo Opener` — that
-arrive with a parent product and are never installed on their own. That group
-is the right home for "not base image, but never a manual install"; putting
-such things in `BaseImageApps.csv` would blur what the baseline means.
-`GoTo Opener` deliberately does not match `GoTo` or `GoToMeeting`, which are
-real installs.
+**Adding a rule is a data edit.** The publisher and pattern rules used to be
+PowerShell arrays; putting them in the same file as the names means the next
+`Dell Products` or `Logitech` decision is a row, not a code change and a
+redeploy. It is also the shape a SharePoint list wants, so swapping the loader
+later touches `Import-AppRule` and nothing else.
 
 ## Current state
 
@@ -226,9 +236,9 @@ serial since — the last real run predates all of this (serial `4QXTTHR3`:
 75 apps, 58 excluded, 17 install candidates), so expect that count to move,
 probably upward.
 
-## Baseline provenance
+## Rule provenance
 
-`BaseImageApps.csv` is no longer hand-curated. It is now:
+The `Name` rules are not hand-curated guesswork. They are:
 
 - the **intersection of 2 known base-image devices** (61 apps on 2/2), from
   `Build-BaseImageList.ps1`
@@ -243,8 +253,10 @@ probably upward.
   names still need to match.
 `Adobe Creative Cloud` was queried and confirmed as base image, so it stays in.
 
-75 rows, 74 distinct keys after normalization; the one collision is the
-x86/x64 pair of the same Visual C++ redistributable.
+82 `Name` rules, plus 12 `Publisher` and 14 `Pattern` rules carried over from
+the arrays that used to be in the script — 108 rows in total. The one
+normalization collision is the x86/x64 pair of the same Visual C++
+redistributable, which is harmless: the rules are a set.
 
 Every row carries its provenance in `Source` — `image-intersection` (62),
 `carried-over` (10), `hand-review-1of2` (3), `hand-review` for inbox apps

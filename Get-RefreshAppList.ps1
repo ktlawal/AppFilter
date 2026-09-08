@@ -8,8 +8,12 @@
     and reports what is left.
 
     The install list is numbered, and unless -NoPrompt is given you are asked
-    whether any of it belongs in the baseline. Anything you pick is appended to
-    the baseline CSV with provenance, so the next refresh filters it.
+    whether any of it belongs in the base image. Anything you pick is appended
+    to AppRules.csv with provenance, so the next refresh filters it.
+
+    All suppression rules - base image names, driver publishers and runtime
+    patterns - live in AppRules.csv, one row each. Adding a rule is a data
+    edit, not a code edit.
 
 .EXAMPLE
     .\Get-RefreshAppList.ps1 -Serial JLY4F42
@@ -44,7 +48,9 @@ param(
     # Skip the "add these to the baseline?" prompt and never touch the CSV
     [switch]$NoPrompt,
 
-    [string]$BaselineCsv = ".\BaseImageApps.csv",
+    # All three rule kinds live in one file - see Import-AppRule.
+    [Alias('BaselineCsv')]
+    [string]$RulesCsv = ".\AppRules.csv",
     [string]$OutputCsv,
 
     # Printable tick-list for the bench. Written to the current directory as
@@ -66,37 +72,8 @@ $CredentialPath = $null   # override for testing; $null resolves to APPDATA
 # -------------------------------------------------------------------
 
 
-# --- NOISE SUPPRESSION RULES ---------------------------------------
-# Publishers whose software arrives with the hardware or the image.
-# Compared through ConvertTo-NormalizedPublisher, so one entry per company is
-# enough - 'Dell', 'Dell Inc.' and 'Dell Technologies' all reduce to 'dell'.
-$DriverPublishers = @(
-    'Intel', 'Realtek', 'Dell', 'NVIDIA', 'Advanced Micro Devices', 'AMD',
-    'Synaptics', 'Conexant', 'Broadcom', 'Qualcomm', 'ELAN', 'Alps Electric'
-)
-
-# Name patterns that are never a manual install.
-$NoisePatterns = @(
-    'Visual C\+\+',
-    'Redistributable',
-    '\.NET (Framework|Runtime|Core)',
-    'Runtime',
-    'Driver',
-    'WebView2',
-    'Update Health Tools',
-    'Windows (SDK|Assessment)',
-    'Microsoft Edge (Update|WebView)',
-    'Management Engine',
-    'Chipset',
-    'Firmware',
-
-    # Helper stubs and sub-components: they arrive with their parent product,
-    # never as a separate install. 'GoTo Opener' does not match 'GoTo' or
-    # 'GoToMeeting', which are real installs.
-    'Notification Manager for Adobe',
-    'GoTo Opener'
-)
-# -------------------------------------------------------------------
+# Suppression rules are data, not code: see AppRules.csv. Adding a publisher
+# or a pattern is a row in that file, not an edit here.
 
 
 function Get-AbsoluteCredential {
@@ -264,23 +241,125 @@ function Read-IndexSelection {
     return $picked
 }
 
-function Add-BaselineEntry {
+function Import-AppRule {
     <#
-        Appends chosen applications to the baseline CSV, carrying provenance so
-        a later reader can tell why a row is there. Rewrites the whole file to
-        keep it sorted and single-shaped.
+        Loads AppRules.csv and buckets it by MatchType. One file, three kinds
+        of rule:
+
+            Name       exact match on the normalized application name
+            Publisher  exact match on the normalized publisher
+            Pattern    regex against the raw application name
+
+        Rows with Active set to anything but Yes are ignored, which is how a
+        rule gets retired without losing its history.
+
+        The Reason column travels with the rule, so what a match is called is
+        data too - but the ORDER the kinds are tried in stays in code, because
+        that ordering is the classifier's meaning, not a preference.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        throw "Rules file not found: $Path"
+    }
+
+    $names      = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $publishers = [System.Collections.Generic.Dictionary[string, string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $patterns   = [System.Collections.Generic.List[object]]::new()
+    $skipped    = 0
+
+    foreach ($row in @(Import-Csv $Path)) {
+
+        if (-not $row.Rule) { continue }
+        if ($row.Active -and $row.Active.Trim() -notmatch '^(yes|true|1)$') { $skipped++; continue }
+
+        $reason = if ($row.Reason) { $row.Reason.Trim() } else { 'Base image' }
+
+        switch (($row.MatchType | ForEach-Object { "$_".Trim() })) {
+
+            'Publisher' {
+                $k = ConvertTo-NormalizedPublisher $row.Rule
+                if ($k -and -not $publishers.ContainsKey($k)) { $publishers.Add($k, $reason) }
+            }
+
+            'Pattern' {
+                # Validate here rather than letting a bad regex blow up mid-run
+                # against a real device.
+                try   { [void][regex]::new($row.Rule) }
+                catch { Write-Warning "Skipping pattern rule '$($row.Rule)' - not a valid regex: $($_.Exception.Message)"; continue }
+                $patterns.Add([pscustomobject]@{ Pattern = $row.Rule; Reason = $reason })
+            }
+
+            default {
+                # Name, and anything unlabelled - a bare name is the common case
+                $k = ConvertTo-NormalizedAppName $row.Rule
+                if ($k -and -not $names.ContainsKey($k)) { $names.Add($k, $reason) }
+            }
+        }
+    }
+
+    Write-Verbose "Rules: $($names.Count) name, $($publishers.Count) publisher, $($patterns.Count) pattern; $skipped inactive."
+
+    [pscustomobject]@{
+        Names      = $names
+        Publishers = $publishers
+        Patterns   = $patterns
+        Path       = $Path
+    }
+}
+
+function Get-AppClassification {
+    <#
+        Returns the reason an application is suppressed, or $null if it is an
+        install candidate.
+
+        Three tests in a fixed order, first match wins. The rules are data; the
+        order is not, because it is what the classifier means: a named product
+        beats its vendor, and a vendor beats a generic pattern.
+    #>
+    param(
+        [Parameter(Mandatory)]$App,
+        [Parameter(Mandatory)]$Rules
+    )
+
+    $matched = ''
+
+    $nameKey = ConvertTo-NormalizedAppName ([string]$App.appName)
+    if ($nameKey -and $Rules.Names.TryGetValue($nameKey, [ref]$matched)) { return $matched }
+
+    $pubKey = ConvertTo-NormalizedPublisher ([string]$App.appPublisher)
+    if ($pubKey -and $Rules.Publishers.TryGetValue($pubKey, [ref]$matched)) { return $matched }
+
+    foreach ($rule in $Rules.Patterns) {
+        if ($App.appName -match $rule.Pattern) { return $rule.Reason }
+    }
+
+    return $null
+}
+
+function Add-AppRule {
+    <#
+        Appends chosen applications to the rules file as Name rules, carrying
+        provenance so a later reader can tell why a row is there. Rewrites the
+        whole file to keep it sorted and single-shaped.
+
+        Only Name rules are added from a run - a publisher or pattern rule is
+        a broader decision than "this one app is base image", and belongs to
+        someone editing the file deliberately.
     #>
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][object[]]$Apps,
-        [string]$Serial
+        [string]$Serial,
+        [string]$Reason = 'Base image'
     )
 
     $existing = @(Import-Csv $Path)
 
     $keys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($row in $existing) {
-        $k = ConvertTo-NormalizedAppName $row.AppName
+        if ($row.MatchType -and $row.MatchType.Trim() -ne 'Name') { continue }
+        $k = ConvertTo-NormalizedAppName $row.Rule
         if ($k) { [void]$keys.Add($k) }
     }
 
@@ -291,13 +370,16 @@ function Add-BaselineEntry {
         $k = ConvertTo-NormalizedAppName $app.AppName
         if (-not $k) { continue }
         if ($keys.Contains($k)) {
-            Write-Warning "'$($app.AppName)' already matches a baseline entry - skipped."
+            Write-Warning "'$($app.AppName)' already matches a rule - skipped."
             continue
         }
         [void]$keys.Add($k)
         $added.Add([pscustomobject]@{
-            AppName   = $app.AppName
+            Rule      = $app.AppName
+            MatchType = 'Name'
+            Reason    = $Reason
             Publisher = $app.Publisher
+            Active    = 'Yes'
             Source    = 'refresh-prompt'
             AddedOn   = $stamp
             AddedBy   = $env:USERNAME
@@ -307,9 +389,13 @@ function Add-BaselineEntry {
 
     if ($added.Count -eq 0) { return 0 }
 
+    # Name rules sorted for readability; Publisher and Pattern keep their
+    # existing order, which for patterns is the order they are tried in.
+    $order = @{ 'Name' = 0; 'Publisher' = 1; 'Pattern' = 2 }
     $all = @(@($existing) + @($added)) |
-        Select-Object AppName, Publisher, Source, AddedOn, AddedBy, Serial |
-        Sort-Object { $_.AppName.ToLowerInvariant() }
+        Select-Object Rule, MatchType, Reason, Publisher, Active, Source, AddedOn, AddedBy, Serial |
+        Sort-Object @{ e = { $order[[string]$_.MatchType] } },
+                    @{ e = { if ($_.MatchType -eq 'Name') { ([string]$_.Rule).ToLowerInvariant() } else { '' } } }
 
     $all | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
     return $added.Count
@@ -404,31 +490,9 @@ function Get-AbsoluteV3 {
 
 
 # ------------------------------------------------------------------
-#  Load the baseline
+#  Load the rules
 # ------------------------------------------------------------------
-if (-not (Test-Path $BaselineCsv)) {
-    throw "Baseline file not found: $BaselineCsv"
-}
-
-$baseline = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-foreach ($row in (Import-Csv $BaselineCsv)) {
-    if ($row.AppName) {
-        $key = ConvertTo-NormalizedAppName $row.AppName
-        if ($key) { [void]$baseline.Add($key) }
-    }
-}
-Write-Verbose "Baseline holds $($baseline.Count) normalized application name(s)."
-
-# NOTE: PowerShell variable names are case-insensitive, so this set must NOT
-# be called $driverPublishers - it would overwrite the $DriverPublishers array
-# above before the loop below had read it, leaving the driver rule matching
-# nothing at all.
-$driverPublisherKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-foreach ($publisher in $DriverPublishers) {
-    $k = ConvertTo-NormalizedPublisher $publisher
-    if ($k) { [void]$driverPublisherKeys.Add($k) }
-}
-Write-Verbose "Driver publisher rule holds $($driverPublisherKeys.Count) normalized publisher(s)."
+$rules = Import-AppRule -Path $RulesCsv
 
 
 # ------------------------------------------------------------------
@@ -668,20 +732,7 @@ if ($apps.Count -eq 0) {
 # ------------------------------------------------------------------
 $classified = foreach ($a in $apps) {
 
-    $reason = $null
-    $key    = ConvertTo-NormalizedAppName ([string]$a.appName)
-
-    if ($key -and $baseline.Contains($key)) {
-        $reason = 'Base image'
-    }
-    elseif ($a.appPublisher -and $driverPublisherKeys.Contains((ConvertTo-NormalizedPublisher ([string]$a.appPublisher)))) {
-        $reason = 'Driver / OEM'
-    }
-    else {
-        foreach ($pattern in $NoisePatterns) {
-            if ($a.appName -match $pattern) { $reason = 'Runtime / component'; break }
-        }
-    }
+    $reason = Get-AppClassification -App $a -Rules $rules
 
     [pscustomobject]@{
         AppName    = $a.appName
@@ -754,7 +805,7 @@ if (-not $NoPrompt -and $toInstall.Count -gt 0) {
             $chosen = @($picked | ForEach-Object { $toInstall[$_ - 1] })
 
             Write-Host ""
-            Write-Host "  Adding to $BaselineCsv :"
+            Write-Host "  Adding to $RulesCsv :"
             foreach ($c in $chosen) {
                 Write-Host ("    [{0}] {1}  ({2})" -f $c.Index, $c.AppName, $c.Publisher)
 
@@ -770,7 +821,7 @@ if (-not $NoPrompt -and $toInstall.Count -gt 0) {
             $confirm = Read-Host "Confirm? [y/N]"
 
             if ($confirm -match '^(y|yes)$') {
-                $count = Add-BaselineEntry -Path $BaselineCsv -Apps $chosen -Serial $device.serialNumber
+                $count = Add-AppRule -Path $RulesCsv -Apps $chosen -Serial $device.serialNumber
                 if ($count -gt 0) {
                     Write-Host "  Added $count row(s). They will be filtered from the next run." -ForegroundColor Green
                 } else {
