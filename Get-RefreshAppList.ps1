@@ -62,15 +62,22 @@ param(
     # Where the Absolute credential comes from. Auto tries each source in
     # turn: environment, then SharePoint if -KeyUrl is set, then the local
     # DPAPI file.
-    [ValidateSet('Auto', 'Environment', 'SharePoint', 'Local')]
+    [ValidateSet('Auto', 'Environment', 'File', 'SharePoint', 'Local')]
     [string]$CredentialSource = 'Auto',
 
-    # SharePoint URL of the key file. Paste the address straight from the
-    # browser or a Copy-link - sharing decoration and query strings are
-    # stripped. Example:
+    # SharePoint URL of the key file, read through Graph. Paste the address
+    # straight from the browser or any Copy-link. Example:
     #   https://contoso.sharepoint.com/sites/IT/Shared Documents/Keys/absolute.json
     # Quote it - a URL containing '&' must be quoted or PowerShell splits it.
-    [string]$KeyUrl
+    [string]$KeyUrl,
+
+    # Path to the key file, read straight off the filesystem. Works for a
+    # network drive, a UNC share, or SharePoint over WebDAV:
+    #   \\server\ITTools$\absolute.json
+    #   \\contoso.sharepoint.com@SSL\DavWWWRoot\sites\IT\Shared Documents\Keys\absolute.json
+    # Needs no Entra app registration - Windows authenticates as you, and the
+    # share or library permissions decide whether you get the file.
+    [string]$KeyPath
 )
 
 # --- CONFIGURATION -------------------------------------------------
@@ -215,7 +222,8 @@ function Get-AbsoluteCredential {
     param(
         [string]$Path,
         [string]$KeyUrl,
-        [ValidateSet('Auto', 'Environment', 'SharePoint', 'Local')]
+        [string]$KeyPath,
+        [ValidateSet('Auto', 'Environment', 'File', 'SharePoint', 'Local')]
         [string]$Source = 'Auto'
     )
 
@@ -233,7 +241,39 @@ function Get-AbsoluteCredential {
         $tried.Add('environment (ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY not set)')
     }
 
-    # --- SharePoint -----------------------------------------------------
+    # --- shared file: network drive, UNC share, or SharePoint over WebDAV -
+    # Tried before Graph because it needs no app registration and no sign-in
+    # prompt: Windows authenticates as the caller and the share's own
+    # permissions decide the outcome.
+    if ($Source -in 'Auto', 'File') {
+        if ($KeyPath) {
+            Write-Verbose "Reading credential from $KeyPath"
+            try {
+                $payload = ConvertFrom-CredentialPayload -Text (Get-Content -Path $KeyPath -Raw -ErrorAction Stop)
+                return [pscustomobject]@{
+                    TokenId   = $payload.TokenId
+                    SecretKey = $payload.SecretKey
+                    Source    = "file ($KeyPath)"
+                }
+            }
+            catch {
+                if ($Source -eq 'File') { throw }
+                $reason = ($_.Exception.Message -replace '\s+', ' ').Trim()
+                if ($reason.Length -gt 160) { $reason = $reason.Substring(0, 160) + '...' }
+                Write-Warning "Could not read the credential from $KeyPath."
+                Write-Warning $reason
+                $tried.Add("file (failed: $reason)")
+            }
+        }
+        elseif ($Source -eq 'File') {
+            throw "-CredentialSource File needs -KeyPath to point at the key file."
+        }
+        else {
+            $tried.Add('file (no -KeyPath given)')
+        }
+    }
+
+    # --- SharePoint via Graph -------------------------------------------
     if ($Source -in 'Auto', 'SharePoint') {
         if ($KeyUrl) {
             Write-Verbose "Reading credential from SharePoint: $KeyUrl"
@@ -848,7 +888,7 @@ function Save-InstallSheet {
 #  Credentials
 # ------------------------------------------------------------------
 # Fail here, before the operator is asked to type anything.
-$credential = Get-AbsoluteCredential -Path $CredentialPath -KeyUrl $KeyUrl -Source $CredentialSource
+$credential = Get-AbsoluteCredential -Path $CredentialPath -KeyUrl $KeyUrl -KeyPath $KeyPath -Source $CredentialSource
 $TokenId    = $credential.TokenId
 $SecretKey  = $credential.SecretKey
 Write-Verbose "Credential loaded from $($credential.Source)."

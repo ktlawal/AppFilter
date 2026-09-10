@@ -25,17 +25,38 @@ token at run time from the first source that answers:
 | Order | Source | How |
 |---|---|---|
 | 1 | **Environment** | `ABSOLUTE_TOKEN_ID` + `ABSOLUTE_SECRET_KEY`, if both are set. The hook a server, container or scheduled task uses. |
-| 2 | **SharePoint** | `-KeyUrl` pointing at a key file in a permission-restricted folder, read through Graph as the signed-in user. |
-| 3 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
+| 2 | **File** | `-KeyPath` pointing at the key file on a network drive, a UNC share, or SharePoint over WebDAV. Windows authenticates as the caller; the share's own permissions decide. **No Entra app registration needed.** |
+| 3 | **SharePoint** | `-KeyUrl` pointing at a key file in a permission-restricted folder, read through Graph as the signed-in user. |
+| 4 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
 
 `-CredentialSource` pins one of `Auto` (the table above), `Environment`,
-`SharePoint` or `Local`. Pinning `SharePoint` makes a failure fatal instead of
+`File`, `SharePoint` or `Local`. Pinning `SharePoint` makes a failure fatal instead of
 falling through — use it when you want to be certain the shared copy is what
 ran.
 
-**SharePoint is tried before the local file on purpose.** If the local copy won,
+**File is tried before Graph** because it needs no app registration and no
+sign-in prompt. **Both are tried before the local file on purpose.** If the local copy won,
 someone removed from the group would keep working off their cached credential
 and revocation would mean nothing.
+
+### Graph is blocked in this tenant
+
+A real attempt returned **AADSTS50105**: the *Microsoft Graph Command Line
+Tools* app (`14d82eec-204b-4c2f-b7e8-296a70dab67e`) has "assignment required"
+set, and the operator was not assigned. That is tenant policy, not a code
+problem, and it blocks `Connect-MgGraph` outright.
+
+Two ways past it, neither of which is in our hands:
+
+- have an admin assign the user or a group to that enterprise app — the
+  smaller-looking ask, but that app is a broad general-purpose Graph client and
+  it was locked down deliberately, so it may be the harder "yes"
+- register a **dedicated** Entra app for this tool with delegated
+  `Files.Read.All` and assign it to the security group — more paperwork, much
+  narrower capability, and usually the easier approval
+
+Until either lands, `-KeyPath` over WebDAV reaches the same file with no Entra
+app involved at all, and the local DPAPI credential works today.
 
 ### The SharePoint key file
 
