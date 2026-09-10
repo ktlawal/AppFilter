@@ -250,8 +250,16 @@ function Get-AbsoluteCredential {
                 # wanted that source and nothing else; failing over silently
                 # would hide a revoked group membership.
                 if ($Source -eq 'SharePoint') { throw }
-                Write-Warning "Could not read the credential from SharePoint, falling back to the local one. ($($_.Exception.Message))"
-                $tried.Add('SharePoint (failed)')
+
+                # Carry the reason into $tried. Without this the final "no
+                # credential found" error says only "SharePoint (failed)",
+                # which tells whoever is reading it nothing at all.
+                $reason = ($_.Exception.Message -replace '\s+', ' ').Trim()
+                if ($reason.Length -gt 160) { $reason = $reason.Substring(0, 160) + '...' }
+
+                Write-Warning "Could not read the credential from SharePoint, falling back to the local one."
+                Write-Warning $reason
+                $tried.Add("SharePoint (failed: $reason)")
             }
         }
         elseif ($Source -eq 'SharePoint') {
