@@ -56,10 +56,21 @@ Two settings on the library are not optional:
   in plaintext on every group member's disk, spreading it further than not
   having done this at all.
 
-`-KeyUrl` takes any shape SharePoint gives you — the browser address bar, or a
-Copy-link with `/:t:/r/` decoration and a query string. `ConvertFrom-SharePointUrl`
-strips the noise and normalises `Documents` / `Shared Documents`, both of which
-mean the site's default library.
+`-KeyUrl` takes **any** shape SharePoint gives you, because the URL is never
+parsed. It is encoded whole as a Graph share token (`u!` + base64url) and
+handed to `/shares/{token}/driveItem/content`, which resolves all of them:
+
+    .../sites/IT/Shared Documents/Keys/k.json           address bar
+    .../:t:/r/sites/IT/Shared%20Documents/Keys/k.json   Copy link
+    .../_layouts/15/download.aspx?UniqueId=<guid>&e=..  Copy link (Download)
+    .../:u:/g/personal/...                              OneDrive
+
+The last two carry no file path at all, only an ID — an earlier version tried
+to parse site and file paths out of the URL and could not handle them.
+
+**Quote the URL on the command line.** A URL containing `&` is split by
+PowerShell into two commands, and the second one fails with a baffling "term is
+not recognized" error naming the query-string fragment.
 
 The Graph read is **delegated on purpose** — it runs as the signed-in user, so
 SharePoint enforces the folder's own permissions and group membership is what
@@ -68,8 +79,9 @@ script, defeating the point. The consequence: this works for a person at a
 keyboard, not for an unattended scheduled task. That would need app-only auth
 and a client secret on the server, which trades the property away.
 
-Needs `Microsoft.Graph.Authentication` and `Microsoft.Graph.Sites`, and the
-`Sites.Read.All` scope — which in many tenants requires admin consent. The
+Needs `Microsoft.Graph.Authentication` (only — the `/shares` call goes
+through `Invoke-MgGraphRequest`, so no `Microsoft.Graph.Sites`), and the
+`Files.Read.All` scope — which in many tenants requires admin consent. The
 error from `Connect-MgGraph` tells you which applies.
 
 ### The local DPAPI file
@@ -172,6 +184,9 @@ Date fields are ISO strings that `ConvertFrom-Json` parses into real
 publisher string. Match on `appName`.
 
 ## PowerShell gotchas already hit (don't reintroduce)
+
+- **An unquoted URL with `&` is two commands.** `-KeyUrl https://...?a=1&e=x`
+  runs `-KeyUrl https://...?a=1` and then tries to execute `e=x`. Always quote.
 
 - **Array unrolling**: `$x = if (...) { @($single) }` flattens back to a
   scalar. Wrap the whole `if` — `$x = @( if (...) { $single } )`.

@@ -27,7 +27,8 @@ if ($errors) {
 }
 foreach ($name in 'ConvertTo-NormalizedAppName', 'ConvertTo-NormalizedPublisher',
                   'Import-AppRule', 'Get-AppClassification',
-                  'ConvertFrom-SharePointUrl', 'ConvertFrom-CredentialPayload') {
+                  'ConvertTo-Base64Url', 'ConvertTo-GraphShareToken',
+                  'ConvertFrom-CredentialPayload') {
     $fn = $ast.FindAll({ param($n)
         $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)[0]
     if (-not $fn) { throw "Function $name not found in the script." }
@@ -156,39 +157,39 @@ Assert-Class 'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33130
 Assert-Class 'Intel(R) Wireless Bluetooth(R)' 'Intel Corporation'  'Driver / OEM'
 Assert-Class 'Realtek High Definition Audio'  'Realtek Semiconductor Corp.' 'Driver / OEM'
 
-Write-Host "`nSharePoint URL parsing" -ForegroundColor Cyan
-function Assert-Url {
-    param($Url, $WantSite, $WantFile)
-    try { $got = ConvertFrom-SharePointUrl -Url $Url }
-    catch {
-        $script:failures++
-        Write-Host -ForegroundColor Red "  FAIL  threw: $($_.Exception.Message)"
-        return
-    }
-    if ($got.SiteId -ceq $WantSite -and $got.FilePath -ceq $WantFile) {
-        Write-Host ("  PASS  {0} -> {1}" -f $got.SiteId, $got.FilePath)
-    } else {
-        $script:failures++
-        Write-Host -ForegroundColor Red ("  FAIL  {0} / {1}   wanted {2} / {3}" -f $got.SiteId, $got.FilePath, $WantSite, $WantFile)
-    }
+Write-Host "`nGraph share-token encoding" -ForegroundColor Cyan
+function Assert-Token {
+    param($Url, $Want, $Label)
+    $got = ConvertTo-GraphShareToken -Url $Url
+    if ($got -ceq $Want) { Write-Host "  PASS  $Label" }
+    else { $script:failures++; Write-Host -ForegroundColor Red "  FAIL  $Label`n        got  $got`n        want $Want" }
 }
 
-# The shape a Copy-link button produces, decoration and query string included.
-Assert-Url 'https://contoso.sharepoint.com/:t:/r/sites/EndpointManagement/Shared%20Documents/Tools/Test/test.txt?d=wc123&csf=1&web=1&e=abc' `
-           'contoso.sharepoint.com:/sites/EndpointManagement:' 'Tools/Test/test.txt'
-# The shape the browser address bar produces.
-Assert-Url 'https://contoso.sharepoint.com/sites/EndpointManagement/Shared Documents/Tools/Test/test.txt' `
-           'contoso.sharepoint.com:/sites/EndpointManagement:' 'Tools/Test/test.txt'
-# "Documents" and "Shared Documents" are the same library.
-Assert-Url 'https://contoso.sharepoint.com/sites/IT/Documents/Keys/absolute.json' `
-           'contoso.sharepoint.com:/sites/IT:' 'Keys/absolute.json'
-# A file at the library root, and a name with a space in it.
-Assert-Url 'https://contoso.sharepoint.com/sites/IT/Shared Documents/absolute key.json' `
-           'contoso.sharepoint.com:/sites/IT:' 'absolute key.json'
+# The example from Microsoft's /shares documentation - if this matches, the
+# encoding is right and every URL shape below rides on it.
+Assert-Token 'https://onedrive.live.com/redir?resid=1231244193%21497&authkey=%211501623218' `
+             'u!aHR0cHM6Ly9vbmVkcml2ZS5saXZlLmNvbS9yZWRpcj9yZXNpZD0xMjMxMjQ0MTkzJTIxNDk3JmF1dGhrZXk9JTIxMTUwMTYyMzIxOA' `
+             'documented example'
 
-foreach ($bad in @('not a url', 'https://contoso.sharepoint.com', 'https://contoso.sharepoint.com/personal/someone/Documents/x.json')) {
-    try   { [void](ConvertFrom-SharePointUrl -Url $bad); $failures++; Write-Host -ForegroundColor Red "  FAIL  accepted '$bad'" }
-    catch { Write-Host "  PASS  rejected '$bad'" }
+# Whitespace around a pasted URL must not change the token.
+$plain = 'https://contoso.sharepoint.com/sites/IT/Shared Documents/Keys/absolute.json'
+Assert-Token "  $plain  " (ConvertTo-GraphShareToken -Url $plain) 'surrounding whitespace ignored'
+
+# The shapes SharePoint actually hands out all encode without complaint.
+foreach ($u in @(
+    $plain
+    'https://contoso.sharepoint.com/:t:/r/sites/IT/Shared%20Documents/Keys/absolute.json?d=w123&csf=1&web=1&e=abc'
+    'https://contoso.sharepoint.com/sites/EndpointManagement/_layouts/15/download.aspx?UniqueId=3bffe414b7e34607aecb688504a8b52e&e=vthxGZ'
+    'https://contoso-my.sharepoint.com/:u:/g/personal/someone_contoso_com/EaBc123'
+)) {
+    $tok = ConvertTo-GraphShareToken -Url $u
+    if ($tok -match '^u![A-Za-z0-9_-]+$') { Write-Host "  PASS  encodes $($u.Substring(0, [Math]::Min(58, $u.Length)))..." }
+    else { $failures++; Write-Host -ForegroundColor Red "  FAIL  bad token for $u" }
+}
+
+foreach ($bad in @('not a url', 'sharepoint.com/sites/IT/x.json', '')) {
+    try   { [void](ConvertTo-GraphShareToken -Url $bad); $failures++; Write-Host -ForegroundColor Red "  FAIL  accepted '$bad'" }
+    catch { Write-Host "  PASS  rejected '$(if($bad){$bad}else{'<empty>'})'" }
 }
 
 Write-Host "`nKey file parsing" -ForegroundColor Cyan

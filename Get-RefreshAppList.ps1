@@ -69,6 +69,7 @@ param(
     # browser or a Copy-link - sharing decoration and query strings are
     # stripped. Example:
     #   https://contoso.sharepoint.com/sites/IT/Shared Documents/Keys/absolute.json
+    # Quote it - a URL containing '&' must be quoted or PowerShell splits it.
     [string]$KeyUrl
 )
 
@@ -88,54 +89,35 @@ $CredentialPath = $null   # override for testing; $null resolves to APPDATA
 # or a pattern is a row in that file, not an edit here.
 
 
-function ConvertFrom-SharePointUrl {
+function ConvertTo-Base64Url {
+    param([byte[]]$Bytes)
+    [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function ConvertTo-GraphShareToken {
     <#
-        Pulls the host, site path and file path out of any of the shapes
-        SharePoint hands you when you copy a link:
+        Encodes a sharing URL the way Graph's /shares endpoint wants it:
+        "u!" followed by base64url of the URL.
 
-            https://x.sharepoint.com/sites/IT/Shared Documents/Keys/k.json
-            https://x.sharepoint.com/:t:/r/sites/IT/Shared%20Documents/Keys/k.json?d=..&web=1
-            https://x.sharepoint.com/sites/IT/Documents/Keys/k.json
+        This is why the script does not try to parse SharePoint URLs into site
+        and file paths. SharePoint hands out at least four shapes -
 
-        The ":t:/r" decoration and the query string are noise. "Documents"
-        and "Shared Documents" both mean the site's default library, which
-        Graph addresses as /drive - so either is normalised away.
+            .../sites/IT/Shared Documents/Keys/k.json          address bar
+            .../:t:/r/sites/IT/Shared%20Documents/Keys/k.json  Copy link
+            .../_layouts/15/download.aspx?UniqueId=<guid>&e=.. Copy link (Download)
+            .../:u:/g/personal/...                             OneDrive
+
+        - and the last two carry no file path at all, only an ID. /shares
+        resolves every one of them, so the URL goes over whole and untouched.
     #>
     param([Parameter(Mandatory)][string]$Url)
 
     $u = $Url.Trim()
-    if ($u -notmatch '^https://') { throw "Not a SharePoint URL: $Url" }
-
-    # Drop the query string, then decode %20 and friends.
-    $u = ($u -split '\?', 2)[0]
-    $u = [uri]::UnescapeDataString($u)
-
-    $rest = $u.Substring('https://'.Length)
-    $slash = $rest.IndexOf('/')
-    if ($slash -lt 1) { throw "No path in SharePoint URL: $Url" }
-
-    $spHost = $rest.Substring(0, $slash)
-    $path   = $rest.Substring($slash)
-
-    # Sharing decoration: /:t:/r/sites/... or /:w:/s/sites/...
-    $path = $path -replace '^/:[a-z]:/[a-z]+/', '/'
-
-    if ($path -notmatch '^/sites/([^/]+)/(.+)$') {
-        throw "Could not find a /sites/<name>/<file> path in: $Url"
+    if ($u -notmatch '^https?://') {
+        throw "That does not look like a URL: $Url`n`nPaste the SharePoint address of the key file, in quotes - a URL containing '&' must be quoted or PowerShell splits it into two commands."
     }
-    $siteName = $Matches[1]
-    $filePath = $Matches[2]
 
-    # The default library appears as either name depending on where the link
-    # came from; Graph reaches it as /drive either way.
-    $filePath = $filePath -replace '^(Shared Documents|Documents)/', ''
-
-    [pscustomobject]@{
-        Host     = $spHost
-        SitePath = "/sites/$siteName"
-        SiteId   = "${spHost}:/sites/${siteName}:"
-        FilePath = $filePath.TrimStart('/')
-    }
+    'u!' + (ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes($u)))
 }
 
 function ConvertFrom-CredentialPayload {
@@ -186,13 +168,13 @@ function Get-SharePointFileText {
 
         Content is kept in memory - a secret should not touch the disk here.
     #>
-    param([Parameter(Mandatory)]$Location)
+    param([Parameter(Mandatory)][string]$Url)
 
     if (-not (Get-Command Connect-MgGraph -ErrorAction SilentlyContinue)) {
         throw @"
 The Microsoft Graph module is not installed, so the key cannot be read from SharePoint.
 
-    Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Sites -Scope CurrentUser
+    Install-Module Microsoft.Graph.Authentication -Scope CurrentUser
 
 Or run with -CredentialSource Local to use the credential stored by
 Set-AbsoluteCredential.ps1 instead.
@@ -200,15 +182,12 @@ Set-AbsoluteCredential.ps1 instead.
     }
 
     if (-not (Get-MgContext)) {
-        Connect-MgGraph -Scopes 'Sites.Read.All' -NoWelcome -ErrorAction Stop
+        Connect-MgGraph -Scopes 'Files.Read.All' -NoWelcome -ErrorAction Stop
     }
 
-    $site = Invoke-MgGraphRequest -Method GET -OutputType PSObject `
-                -Uri "/v1.0/sites/$($Location.SiteId)" -ErrorAction Stop
-
-    $encoded  = ($Location.FilePath -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+    $token    = ConvertTo-GraphShareToken -Url $Url
     $response = Invoke-MgGraphRequest -Method GET -OutputType HttpResponseMessage `
-                    -Uri "/v1.0/sites/$($site.id)/drive/root:/$encoded`:/content" -ErrorAction Stop
+                    -Uri "/v1.0/shares/$token/driveItem/content" -ErrorAction Stop
 
     $response.Content.ReadAsStringAsync().Result
 }
@@ -257,14 +236,13 @@ function Get-AbsoluteCredential {
     # --- SharePoint -----------------------------------------------------
     if ($Source -in 'Auto', 'SharePoint') {
         if ($KeyUrl) {
-            $location = ConvertFrom-SharePointUrl -Url $KeyUrl
-            Write-Verbose "Reading credential from SharePoint: $($location.SiteId) $($location.FilePath)"
+            Write-Verbose "Reading credential from SharePoint: $KeyUrl"
             try {
-                $payload = ConvertFrom-CredentialPayload -Text (Get-SharePointFileText -Location $location)
+                $payload = ConvertFrom-CredentialPayload -Text (Get-SharePointFileText -Url $KeyUrl)
                 return [pscustomobject]@{
                     TokenId   = $payload.TokenId
                     SecretKey = $payload.SecretKey
-                    Source    = "SharePoint ($($location.FilePath))"
+                    Source    = 'SharePoint'
                 }
             }
             catch {
@@ -595,11 +573,6 @@ function Add-AppRule {
 
     $all | Export-Csv -Path $Path -NoTypeInformation -Encoding UTF8
     return $added.Count
-}
-
-function ConvertTo-Base64Url {
-    param([byte[]]$Bytes)
-    [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
 function Invoke-AbsoluteApi {
