@@ -57,7 +57,19 @@ param(
     # <serial>-InstallList.html unless a path is given here or -NoSheet is set.
     [string]$OutputHtml,
 
-    [switch]$NoSheet
+    [switch]$NoSheet,
+
+    # Where the Absolute credential comes from. Auto tries each source in
+    # turn: environment, then SharePoint if -KeyUrl is set, then the local
+    # DPAPI file.
+    [ValidateSet('Auto', 'Environment', 'SharePoint', 'Local')]
+    [string]$CredentialSource = 'Auto',
+
+    # SharePoint URL of the key file. Paste the address straight from the
+    # browser or a Copy-link - sharing decoration and query strings are
+    # stripped. Example:
+    #   https://contoso.sharepoint.com/sites/IT/Shared Documents/Keys/absolute.json
+    [string]$KeyUrl
 )
 
 # --- CONFIGURATION -------------------------------------------------
@@ -76,65 +88,249 @@ $CredentialPath = $null   # override for testing; $null resolves to APPDATA
 # or a pattern is a row in that file, not an edit here.
 
 
-function Get-AbsoluteCredential {
+function ConvertFrom-SharePointUrl {
     <#
-        Returns the token ID and secret for this run.
+        Pulls the host, site path and file path out of any of the shapes
+        SharePoint hands you when you copy a link:
 
-        Environment variables win, so a server, container or scheduled context
-        can inject them without a file. Otherwise the DPAPI-protected file
-        written by Set-AbsoluteCredential.ps1 is used - it decrypts only for
-        the Windows account that created it, on the machine that created it.
+            https://x.sharepoint.com/sites/IT/Shared Documents/Keys/k.json
+            https://x.sharepoint.com/:t:/r/sites/IT/Shared%20Documents/Keys/k.json?d=..&web=1
+            https://x.sharepoint.com/sites/IT/Documents/Keys/k.json
+
+        The ":t:/r" decoration and the query string are noise. "Documents"
+        and "Shared Documents" both mean the site's default library, which
+        Graph addresses as /drive - so either is normalised away.
     #>
-    param([string]$Path)
+    param([Parameter(Mandatory)][string]$Url)
 
-    if ($env:ABSOLUTE_TOKEN_ID -and $env:ABSOLUTE_SECRET_KEY) {
-        return [pscustomobject]@{
-            TokenId   = $env:ABSOLUTE_TOKEN_ID
-            SecretKey = $env:ABSOLUTE_SECRET_KEY
-            Source    = 'environment'
+    $u = $Url.Trim()
+    if ($u -notmatch '^https://') { throw "Not a SharePoint URL: $Url" }
+
+    # Drop the query string, then decode %20 and friends.
+    $u = ($u -split '\?', 2)[0]
+    $u = [uri]::UnescapeDataString($u)
+
+    $rest = $u.Substring('https://'.Length)
+    $slash = $rest.IndexOf('/')
+    if ($slash -lt 1) { throw "No path in SharePoint URL: $Url" }
+
+    $spHost = $rest.Substring(0, $slash)
+    $path   = $rest.Substring($slash)
+
+    # Sharing decoration: /:t:/r/sites/... or /:w:/s/sites/...
+    $path = $path -replace '^/:[a-z]:/[a-z]+/', '/'
+
+    if ($path -notmatch '^/sites/([^/]+)/(.+)$') {
+        throw "Could not find a /sites/<name>/<file> path in: $Url"
+    }
+    $siteName = $Matches[1]
+    $filePath = $Matches[2]
+
+    # The default library appears as either name depending on where the link
+    # came from; Graph reaches it as /drive either way.
+    $filePath = $filePath -replace '^(Shared Documents|Documents)/', ''
+
+    [pscustomobject]@{
+        Host     = $spHost
+        SitePath = "/sites/$siteName"
+        SiteId   = "${spHost}:/sites/${siteName}:"
+        FilePath = $filePath.TrimStart('/')
+    }
+}
+
+function ConvertFrom-CredentialPayload {
+    <#
+        Turns the stored key file into a token ID and secret.
+
+        Accepts JSON, or base64 of that JSON - so the file can be made
+        unreadable at a glance without the script needing to be told which
+        it is. Base64 is obfuscation against shoulder-surfing and preview
+        panes, NOT encryption: anyone who can read the file can decode it.
+        The access control on the folder is what actually protects it.
+    #>
+    param([Parameter(Mandatory)][string]$Text)
+
+    $raw = $Text.Trim()
+    if (-not $raw) { throw "The key file is empty." }
+
+    # A base64 blob has no braces; try decoding before giving up on it.
+    if ($raw -notmatch '[{}]') {
+        try {
+            $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($raw))
+            if ($decoded -match '[{}]') { $raw = $decoded }
+        } catch {
+            # Not base64 either - fall through and let the JSON parse complain.
         }
     }
 
-    if (-not $Path) {
-        if (-not $env:APPDATA) {
-            throw "No credential in the environment, and APPDATA is not set so the default location cannot be resolved."
-        }
-        $Path = Join-Path $env:APPDATA 'AppFilter\absolute.cred.xml'
+    try   { $data = $raw | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "The key file is neither JSON nor base64-encoded JSON. ($($_.Exception.Message))" }
+
+    $tokenId   = $data.tokenId
+    $secretKey = $data.secretKey
+
+    if (-not $tokenId -or -not $secretKey) {
+        throw "The key file must contain both 'tokenId' and 'secretKey'."
     }
 
-    if (-not (Test-Path $Path)) {
+    [pscustomobject]@{ TokenId = "$tokenId".Trim(); SecretKey = "$secretKey".Trim() }
+}
+
+function Get-SharePointFileText {
+    <#
+        Reads a file from SharePoint through Microsoft Graph, as the signed-in
+        user. Delegated on purpose: SharePoint then enforces the folder's own
+        permissions, so group membership is what grants access. App-only auth
+        would read the file regardless of who ran the script, which would
+        defeat the point of putting it in a restricted folder.
+
+        Content is kept in memory - a secret should not touch the disk here.
+    #>
+    param([Parameter(Mandatory)]$Location)
+
+    if (-not (Get-Command Connect-MgGraph -ErrorAction SilentlyContinue)) {
         throw @"
-No Absolute credential found.
+The Microsoft Graph module is not installed, so the key cannot be read from SharePoint.
 
-Run the one-time setup first:
+    Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Sites -Scope CurrentUser
 
-    .\Set-AbsoluteCredential.ps1
-
-It stores your token under your own Windows profile, encrypted so that only
-you on this machine can read it. Alternatively set ABSOLUTE_TOKEN_ID and
-ABSOLUTE_SECRET_KEY in the environment.
+Or run with -CredentialSource Local to use the credential stored by
+Set-AbsoluteCredential.ps1 instead.
 "@
     }
 
-    try {
-        $cred = Import-Clixml -Path $Path -ErrorAction Stop
-    }
-    catch {
-        # Two causes look the same from here: a file copied from another
-        # machine or profile (DPAPI refuses it - which is the point), or a
-        # corrupt file. Name both rather than asserting the wrong one.
-        throw "Could not read the stored credential at $Path. If it was copied from another machine or user profile it cannot be decrypted here; it may also be corrupt. Re-run .\Set-AbsoluteCredential.ps1 on this machine. ($($_.Exception.Message))"
+    if (-not (Get-MgContext)) {
+        Connect-MgGraph -Scopes 'Sites.Read.All' -NoWelcome -ErrorAction Stop
     }
 
-    if ($cred -isnot [System.Management.Automation.PSCredential]) {
-        throw "$Path is not a stored credential. Re-run .\Set-AbsoluteCredential.ps1."
+    $site = Invoke-MgGraphRequest -Method GET -OutputType PSObject `
+                -Uri "/v1.0/sites/$($Location.SiteId)" -ErrorAction Stop
+
+    $encoded  = ($Location.FilePath -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
+    $response = Invoke-MgGraphRequest -Method GET -OutputType HttpResponseMessage `
+                    -Uri "/v1.0/sites/$($site.id)/drive/root:/$encoded`:/content" -ErrorAction Stop
+
+    $response.Content.ReadAsStringAsync().Result
+}
+
+function Get-AbsoluteCredential {
+    <#
+        Resolves the token ID and secret for this run, trying each source in
+        turn and reporting which one answered.
+
+            Environment  ABSOLUTE_TOKEN_ID + ABSOLUTE_SECRET_KEY. The hook a
+                         server, container or scheduled task uses.
+            SharePoint   A key file in a permission-restricted folder, read as
+                         the signed-in user. This is the source of truth when
+                         it is configured: rotating means editing one file, and
+                         removing someone from the group stops them on their
+                         next run.
+            Local        The DPAPI file written by Set-AbsoluteCredential.ps1.
+                         Decrypts only for the account and machine that wrote
+                         it, so a copied file is inert.
+
+        SharePoint is tried BEFORE the local file on purpose. If the local copy
+        won its way, someone removed from the group would keep working off a
+        cache and revocation would mean nothing.
+    #>
+    param(
+        [string]$Path,
+        [string]$KeyUrl,
+        [ValidateSet('Auto', 'Environment', 'SharePoint', 'Local')]
+        [string]$Source = 'Auto'
+    )
+
+    $tried = [System.Collections.Generic.List[string]]::new()
+
+    # --- environment ----------------------------------------------------
+    if ($Source -in 'Auto', 'Environment') {
+        if ($env:ABSOLUTE_TOKEN_ID -and $env:ABSOLUTE_SECRET_KEY) {
+            return [pscustomobject]@{
+                TokenId   = $env:ABSOLUTE_TOKEN_ID
+                SecretKey = $env:ABSOLUTE_SECRET_KEY
+                Source    = 'environment'
+            }
+        }
+        $tried.Add('environment (ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY not set)')
     }
 
-    [pscustomobject]@{
-        TokenId   = $cred.UserName
-        SecretKey = $cred.GetNetworkCredential().Password
-        Source    = $Path
+    # --- SharePoint -----------------------------------------------------
+    if ($Source -in 'Auto', 'SharePoint') {
+        if ($KeyUrl) {
+            $location = ConvertFrom-SharePointUrl -Url $KeyUrl
+            Write-Verbose "Reading credential from SharePoint: $($location.SiteId) $($location.FilePath)"
+            try {
+                $payload = ConvertFrom-CredentialPayload -Text (Get-SharePointFileText -Location $location)
+                return [pscustomobject]@{
+                    TokenId   = $payload.TokenId
+                    SecretKey = $payload.SecretKey
+                    Source    = "SharePoint ($($location.FilePath))"
+                }
+            }
+            catch {
+                # An explicit -CredentialSource SharePoint means the caller
+                # wanted that source and nothing else; failing over silently
+                # would hide a revoked group membership.
+                if ($Source -eq 'SharePoint') { throw }
+                Write-Warning "Could not read the credential from SharePoint, falling back to the local one. ($($_.Exception.Message))"
+                $tried.Add('SharePoint (failed)')
+            }
+        }
+        elseif ($Source -eq 'SharePoint') {
+            throw "-CredentialSource SharePoint needs -KeyUrl to point at the key file."
+        }
+        else {
+            $tried.Add('SharePoint (no -KeyUrl given)')
+        }
     }
+
+    # --- local DPAPI file ----------------------------------------------
+    if ($Source -in 'Auto', 'Local') {
+
+        if (-not $Path) {
+            if (-not $env:APPDATA) {
+                throw "No credential found, and APPDATA is not set so the local default location cannot be resolved. Tried: $($tried -join '; ')."
+            }
+            $Path = Join-Path $env:APPDATA 'AppFilter\absolute.cred.xml'
+        }
+
+        if (Test-Path $Path) {
+            try {
+                $cred = Import-Clixml -Path $Path -ErrorAction Stop
+            }
+            catch {
+                # Two causes look the same from here: a file copied from another
+                # machine or profile (DPAPI refuses it - which is the point), or a
+                # corrupt file. Name both rather than asserting the wrong one.
+                throw "Could not read the stored credential at $Path. If it was copied from another machine or user profile it cannot be decrypted here; it may also be corrupt. Re-run .\Set-AbsoluteCredential.ps1 on this machine. ($($_.Exception.Message))"
+            }
+
+            if ($cred -isnot [System.Management.Automation.PSCredential]) {
+                throw "$Path is not a stored credential. Re-run .\Set-AbsoluteCredential.ps1."
+            }
+
+            return [pscustomobject]@{
+                TokenId   = $cred.UserName
+                SecretKey = $cred.GetNetworkCredential().Password
+                Source    = $Path
+            }
+        }
+        $tried.Add("local file ($Path not found)")
+    }
+
+    throw @"
+No Absolute credential found. Tried: $($tried -join '; ').
+
+Either store one on this machine:
+
+    .\Set-AbsoluteCredential.ps1
+
+or point at the shared key file:
+
+    .\Get-RefreshAppList.ps1 <serial> -KeyUrl 'https://<tenant>.sharepoint.com/sites/<site>/Shared Documents/<path>/absolute.json'
+
+or set ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY in the environment.
+"@
 }
 
 function ConvertTo-NormalizedAppName {
@@ -671,7 +867,7 @@ function Save-InstallSheet {
 #  Credentials
 # ------------------------------------------------------------------
 # Fail here, before the operator is asked to type anything.
-$credential = Get-AbsoluteCredential -Path $CredentialPath
+$credential = Get-AbsoluteCredential -Path $CredentialPath -KeyUrl $KeyUrl -Source $CredentialSource
 $TokenId    = $credential.TokenId
 $SecretKey  = $credential.SecretKey
 Write-Verbose "Credential loaded from $($credential.Source)."

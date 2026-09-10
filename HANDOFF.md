@@ -20,36 +20,80 @@ installs (Intune group membership) is a possible later phase.
 ## Credentials
 
 Nothing sensitive lives in the repo. `Get-RefreshAppList.ps1` resolves the
-token at run time, in this order:
+token at run time from the first source that answers:
 
-1. `ABSOLUTE_TOKEN_ID` + `ABSOLUTE_SECRET_KEY` environment variables, if both
-   are set — this is the hook a server, container or scheduled task uses
-2. otherwise `%APPDATA%\AppFilter\absolute.cred.xml`, written once per person
-   per machine by `Set-AbsoluteCredential.ps1`
+| Order | Source | How |
+|---|---|---|
+| 1 | **Environment** | `ABSOLUTE_TOKEN_ID` + `ABSOLUTE_SECRET_KEY`, if both are set. The hook a server, container or scheduled task uses. |
+| 2 | **SharePoint** | `-KeyUrl` pointing at a key file in a permission-restricted folder, read through Graph as the signed-in user. |
+| 3 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
 
-The file is a `PSCredential` exported with `Export-Clixml`, so the secret is
-encrypted with **DPAPI under the current user**. Copy it to another machine,
-another profile, or a USB stick and it will not decrypt. The token ID is stored
-readable, which is fine — it is useless without the secret.
+`-CredentialSource` pins one of `Auto` (the table above), `Environment`,
+`SharePoint` or `Local`. Pinning `SharePoint` makes a failure fatal instead of
+falling through — use it when you want to be certain the shared copy is what
+ran.
+
+**SharePoint is tried before the local file on purpose.** If the local copy won,
+someone removed from the group would keep working off their cached credential
+and revocation would mean nothing.
+
+### The SharePoint key file
+
+```json
+{ "tokenId": "a1c16ebf-...", "secretKey": "..." }
+```
+
+Plain JSON, or base64 of that JSON — the script detects which. Base64 stops the
+SharePoint preview pane and a passing glance from rendering the secret. It is
+**obfuscation, not encryption**: anyone who can read the file can decode it in
+one command. What actually protects it is the folder's permissions.
+
+Two settings on the library are not optional:
+
+- **Restrict it to the security group.** That restriction *is* the access control.
+- **Block sync** (Library Settings → Advanced → *Offline Client Availability: No*,
+  and disable the Sync button at site level). Otherwise OneDrive puts the secret
+  in plaintext on every group member's disk, spreading it further than not
+  having done this at all.
+
+`-KeyUrl` takes any shape SharePoint gives you — the browser address bar, or a
+Copy-link with `/:t:/r/` decoration and a query string. `ConvertFrom-SharePointUrl`
+strips the noise and normalises `Documents` / `Shared Documents`, both of which
+mean the site's default library.
+
+The Graph read is **delegated on purpose** — it runs as the signed-in user, so
+SharePoint enforces the folder's own permissions and group membership is what
+grants access. App-only auth would read the file regardless of who ran the
+script, defeating the point. The consequence: this works for a person at a
+keyboard, not for an unattended scheduled task. That would need app-only auth
+and a client secret on the server, which trades the property away.
+
+Needs `Microsoft.Graph.Authentication` and `Microsoft.Graph.Sites`, and the
+`Sites.Read.All` scope — which in many tenants requires admin consent. The
+error from `Connect-MgGraph` tells you which applies.
+
+### The local DPAPI file
+
+A `PSCredential` exported with `Export-Clixml`, so the secret is encrypted with
+**DPAPI under the current user**. Copy it to another machine, another profile,
+or a USB stick and it will not decrypt. The token ID is stored readable, which
+is fine — it is useless without the secret.
 
 **`Set-AbsoluteCredential.ps1` refuses to run on non-Windows, deliberately.**
-DPAPI is a Windows facility; elsewhere PowerShell still writes the file, but
-the "encrypted" password is only UTF-16 hex of the plaintext — any local user
-recovers it with a single `Import-Clixml`. Writing that would look protected
-and would not be, so the script errors instead.
+DPAPI is a Windows facility; elsewhere PowerShell still writes the file, but the
+"encrypted" password is only UTF-16 hex of the plaintext — any local user
+recovers it with a single `Import-Clixml`. Writing that would look protected and
+would not be, so the script errors instead.
 
-What this does and does not buy you:
+### What each control actually buys
 
-- **Does**: a leaked, copied or emailed credential file is inert. A stolen
-  powered-off laptop yields nothing. The script is safe to sign, share,
-  screen-share and commit.
-- **Does not**: stop malware running as that user, stop a domain admin (DPAPI
-  master keys are escrowed to the DC), give central revocation, give per-person
-  audit, or apply MFA and conditional access. Those need the credential to move
-  off the endpoint entirely — see the broker sketch under Possible next steps.
-
-Pair it with per-person read-only tokens and an expiry date; that is what makes
-revocation and attribution work at all.
+- **Approved IP Addresses** (set on the token in Absolute) — a leaked key is
+  useless off the corporate network. The single biggest win, and independent of
+  everything above.
+- **SharePoint folder** — central rotation, real revocation, an access trail.
+  Does not stop a group member keeping a copy.
+- **DPAPI** — a leaked *file* is inert. Does not give revocation or audit.
+- **Token expiry** — bounded lifetime regardless. Currently Jan 7, 2027.
 
 ## Absolute API — verified facts
 

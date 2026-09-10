@@ -26,7 +26,8 @@ if ($errors) {
     throw "Get-RefreshAppList.ps1 does not parse."
 }
 foreach ($name in 'ConvertTo-NormalizedAppName', 'ConvertTo-NormalizedPublisher',
-                  'Import-AppRule', 'Get-AppClassification') {
+                  'Import-AppRule', 'Get-AppClassification',
+                  'ConvertFrom-SharePointUrl', 'ConvertFrom-CredentialPayload') {
     $fn = $ast.FindAll({ param($n)
         $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)[0]
     if (-not $fn) { throw "Function $name not found in the script." }
@@ -154,6 +155,64 @@ Assert-Class 'Tanium Client 7.9.2.1'  'Tanium'                     'Base image'
 Assert-Class 'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33130' 'Microsoft' 'Base image'
 Assert-Class 'Intel(R) Wireless Bluetooth(R)' 'Intel Corporation'  'Driver / OEM'
 Assert-Class 'Realtek High Definition Audio'  'Realtek Semiconductor Corp.' 'Driver / OEM'
+
+Write-Host "`nSharePoint URL parsing" -ForegroundColor Cyan
+function Assert-Url {
+    param($Url, $WantSite, $WantFile)
+    try { $got = ConvertFrom-SharePointUrl -Url $Url }
+    catch {
+        $script:failures++
+        Write-Host -ForegroundColor Red "  FAIL  threw: $($_.Exception.Message)"
+        return
+    }
+    if ($got.SiteId -ceq $WantSite -and $got.FilePath -ceq $WantFile) {
+        Write-Host ("  PASS  {0} -> {1}" -f $got.SiteId, $got.FilePath)
+    } else {
+        $script:failures++
+        Write-Host -ForegroundColor Red ("  FAIL  {0} / {1}   wanted {2} / {3}" -f $got.SiteId, $got.FilePath, $WantSite, $WantFile)
+    }
+}
+
+# The shape a Copy-link button produces, decoration and query string included.
+Assert-Url 'https://contoso.sharepoint.com/:t:/r/sites/EndpointManagement/Shared%20Documents/Tools/Test/test.txt?d=wc123&csf=1&web=1&e=abc' `
+           'contoso.sharepoint.com:/sites/EndpointManagement:' 'Tools/Test/test.txt'
+# The shape the browser address bar produces.
+Assert-Url 'https://contoso.sharepoint.com/sites/EndpointManagement/Shared Documents/Tools/Test/test.txt' `
+           'contoso.sharepoint.com:/sites/EndpointManagement:' 'Tools/Test/test.txt'
+# "Documents" and "Shared Documents" are the same library.
+Assert-Url 'https://contoso.sharepoint.com/sites/IT/Documents/Keys/absolute.json' `
+           'contoso.sharepoint.com:/sites/IT:' 'Keys/absolute.json'
+# A file at the library root, and a name with a space in it.
+Assert-Url 'https://contoso.sharepoint.com/sites/IT/Shared Documents/absolute key.json' `
+           'contoso.sharepoint.com:/sites/IT:' 'absolute key.json'
+
+foreach ($bad in @('not a url', 'https://contoso.sharepoint.com', 'https://contoso.sharepoint.com/personal/someone/Documents/x.json')) {
+    try   { [void](ConvertFrom-SharePointUrl -Url $bad); $failures++; Write-Host -ForegroundColor Red "  FAIL  accepted '$bad'" }
+    catch { Write-Host "  PASS  rejected '$bad'" }
+}
+
+Write-Host "`nKey file parsing" -ForegroundColor Cyan
+function Assert-Payload {
+    param($Text, $WantId, $Label)
+    try { $got = ConvertFrom-CredentialPayload -Text $Text }
+    catch {
+        $script:failures++
+        Write-Host -ForegroundColor Red "  FAIL  $Label threw: $($_.Exception.Message)"
+        return
+    }
+    if ($got.TokenId -ceq $WantId) { Write-Host "  PASS  $Label" }
+    else { $script:failures++; Write-Host -ForegroundColor Red "  FAIL  $Label gave '$($got.TokenId)'" }
+}
+
+$json = '{"tokenId":"a1c16ebf-1234","secretKey":"s3cr3t"}'
+Assert-Payload $json 'a1c16ebf-1234' 'plain JSON'
+Assert-Payload ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))) 'a1c16ebf-1234' 'base64 JSON'
+Assert-Payload "  $json  `n" 'a1c16ebf-1234' 'JSON with surrounding whitespace'
+
+foreach ($bad in @('', '   ', 'hello world', '{"tokenId":"only-an-id"}', '{"secretKey":"only-a-secret"}')) {
+    try   { [void](ConvertFrom-CredentialPayload -Text $bad); $failures++; Write-Host -ForegroundColor Red "  FAIL  accepted '$bad'" }
+    catch { Write-Host "  PASS  rejected '$(if($bad.Trim()){$bad}else{'<empty>'})'" }
+}
 
 Write-Host ""
 if ($failures -eq 0) { Write-Host "All cases passed." -ForegroundColor Green }
