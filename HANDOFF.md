@@ -26,86 +26,47 @@ token at run time from the first source that answers:
 |---|---|---|
 | 1 | **Environment** | `ABSOLUTE_TOKEN_ID` + `ABSOLUTE_SECRET_KEY`, if both are set. The hook a server, container or scheduled task uses. |
 | 2 | **File** | `-KeyPath` pointing at the key file on a network drive, a UNC share, or SharePoint over WebDAV. Windows authenticates as the caller; the share's own permissions decide. **No Entra app registration needed.** |
-| 3 | **SharePoint** | `-KeyUrl` pointing at a key file in a permission-restricted folder, read through Graph as the signed-in user. |
-| 4 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
+| 3 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
 
 `-CredentialSource` pins one of `Auto` (the table above), `Environment`,
-`File`, `SharePoint` or `Local`. Pinning `SharePoint` makes a failure fatal instead of
+`File` or `Local`. Pinning `SharePoint` makes a failure fatal instead of
 falling through — use it when you want to be certain the shared copy is what
 ran.
 
-**File is tried before Graph** because it needs no app registration and no
-sign-in prompt. **Both are tried before the local file on purpose.** If the local copy won,
+**File is tried before the local one on purpose.** If the local copy won,
 someone removed from the group would keep working off their cached credential
 and revocation would mean nothing.
 
-### Graph is blocked in this tenant
-
-A real attempt returned **AADSTS50105**: the *Microsoft Graph Command Line
-Tools* app (`14d82eec-204b-4c2f-b7e8-296a70dab67e`) has "assignment required"
-set, and the operator was not assigned. That is tenant policy, not a code
-problem, and it blocks `Connect-MgGraph` outright.
-
-Two ways past it, neither of which is in our hands:
-
-- have an admin assign the user or a group to that enterprise app — the
-  smaller-looking ask, but that app is a broad general-purpose Graph client and
-  it was locked down deliberately, so it may be the harder "yes"
-- register a **dedicated** Entra app for this tool with delegated
-  `Files.Read.All` and assign it to the security group — more paperwork, much
-  narrower capability, and usually the easier approval
-
-Until either lands, `-KeyPath` over WebDAV reaches the same file with no Entra
-app involved at all, and the local DPAPI credential works today.
-
-### The SharePoint key file
+### The shared key file
 
 ```json
 { "tokenId": "a1c16ebf-...", "secretKey": "..." }
 ```
 
-Plain JSON, or base64 of that JSON — the script detects which. Base64 stops the
-SharePoint preview pane and a passing glance from rendering the secret. It is
-**obfuscation, not encryption**: anyone who can read the file can decode it in
-one command. What actually protects it is the folder's permissions.
+Plain JSON, or base64 of that JSON — the script detects which. Base64 stops a
+preview pane or a passing glance rendering the secret. It is **obfuscation, not
+encryption**: anyone who can read the file can decode it in one command. What
+protects it is the share or library permissions.
 
-Two settings on the library are not optional:
+`-KeyPath` takes any path Windows can reach:
 
-- **Restrict it to the security group.** That restriction *is* the access control.
-- **Block sync** (Library Settings → Advanced → *Offline Client Availability: No*,
-  and disable the Sync button at site level). Otherwise OneDrive puts the secret
-  in plaintext on every group member's disk, spreading it further than not
-  having done this at all.
+    \\server\ITTools$\absolute.json
+    \\contoso.sharepoint.com@SSL\DavWWWRoot\sites\IT\Shared Documents\Keys\absolute.json
 
-`-KeyUrl` takes **any** shape SharePoint gives you, because the URL is never
-parsed. It is encoded whole as a Graph share token (`u!` + base64url) and
-handed to `/shares/{token}/driveItem/content`, which resolves all of them:
+The second form is SharePoint over WebDAV, which needs no Entra app
+registration — Windows authenticates as the caller.
 
-    .../sites/IT/Shared Documents/Keys/k.json           address bar
-    .../:t:/r/sites/IT/Shared%20Documents/Keys/k.json   Copy link
-    .../_layouts/15/download.aspx?UniqueId=<guid>&e=..  Copy link (Download)
-    .../:u:/g/personal/...                              OneDrive
+**Microsoft Graph was tried and removed.** A real attempt returned
+**AADSTS50105**: the *Microsoft Graph Command Line Tools* app
+(`14d82eec-204b-4c2f-b7e8-296a70dab67e`) has "assignment required" set in this
+tenant and the operator was not assigned, so `Connect-MgGraph` is blocked
+outright. That is tenant policy, not a code problem. Getting past it needs
+either an admin assignment to that app, or a dedicated Entra app registration
+with delegated `Files.Read.All` — neither of which had landed, so the Graph
+code was taken back out rather than left as dead weight. The commit history
+has it if it is ever wanted back.
 
-The last two carry no file path at all, only an ID — an earlier version tried
-to parse site and file paths out of the URL and could not handle them.
-
-**Quote the URL on the command line.** A URL containing `&` is split by
-PowerShell into two commands, and the second one fails with a baffling "term is
-not recognized" error naming the query-string fragment.
-
-The Graph read is **delegated on purpose** — it runs as the signed-in user, so
-SharePoint enforces the folder's own permissions and group membership is what
-grants access. App-only auth would read the file regardless of who ran the
-script, defeating the point. The consequence: this works for a person at a
-keyboard, not for an unattended scheduled task. That would need app-only auth
-and a client secret on the server, which trades the property away.
-
-Needs `Microsoft.Graph.Authentication` (only — the `/shares` call goes
-through `Invoke-MgGraphRequest`, so no `Microsoft.Graph.Sites`), and the
-`Files.Read.All` scope — which in many tenants requires admin consent. The
-error from `Connect-MgGraph` tells you which applies.
-
-### The local DPAPI file
+### The local DPAPI file### The local DPAPI file
 
 A `PSCredential` exported with `Export-Clixml`, so the secret is encrypted with
 **DPAPI under the current user**. Copy it to another machine, another profile,
