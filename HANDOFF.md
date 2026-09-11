@@ -19,56 +19,58 @@ installs (Intune group membership) is a possible later phase.
 
 ## Credentials
 
-Nothing sensitive lives in the repo. `Get-RefreshAppList.ps1` resolves the
-token at run time from the first source that answers:
+Nothing sensitive lives in the repo, and the tool stores nothing on disk. The
+token comes from two environment variables:
 
-| Order | Source | How |
-|---|---|---|
-| 1 | **Environment** | `ABSOLUTE_TOKEN_ID` + `ABSOLUTE_SECRET_KEY`, if both are set. The hook a server, container or scheduled task uses. |
-| 2 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
+    ABSOLUTE_TOKEN_ID
+    ABSOLUTE_SECRET_KEY
 
-`-CredentialSource` pins one of `Auto` (the table above), `Environment` or
-`Local`.
+Set them for the session, or once for your Windows account:
 
-### The local DPAPI file
+```powershell
+[Environment]::SetEnvironmentVariable('ABSOLUTE_TOKEN_ID',  '<id>',     'User')
+[Environment]::SetEnvironmentVariable('ABSOLUTE_SECRET_KEY','<secret>', 'User')
+```
 
-A `PSCredential` exported with `Export-Clixml`, so the secret is encrypted with
-**DPAPI under the current user**. Copy it to another machine, another profile,
-or a USB stick and it will not decrypt. The token ID is stored readable, which
-is fine — it is useless without the secret.
+Open a new PowerShell window afterwards. Missing either one gives an error that
+names which.
 
-**`Set-AbsoluteCredential.ps1` refuses to run on non-Windows, deliberately.**
-DPAPI is a Windows facility; elsewhere PowerShell still writes the file, but the
-"encrypted" password is only UTF-16 hex of the plaintext — any local user
-recovers it with a single `Import-Clixml`. Writing that would look protected and
-would not be, so the script errors instead.
+Be clear on what this does and does not buy. It keeps the secret out of the
+script, so the file is safe to sign, share, screen-share and commit. User-scoped
+variables live in the registry under `HKCU\Environment` in plaintext, readable
+by anything running as that account — so this is not protection against code
+already running as you, and a `Get-ChildItem Env:` in a shared screen will show
+it.
 
-### Two shared-key routes were built and removed
+### Three richer routes were built and removed
 
-Both worked as designed and both were taken out rather than left as dead code.
-The commit history has them if they are ever wanted back.
+All three worked. They came out as the scope narrowed to a single operator, and
+the commit history has each of them.
 
-- **SharePoint via Microsoft Graph.** Blocked by tenant policy, not by the code:
-  a real attempt returned **AADSTS50105** — the *Microsoft Graph Command Line
-  Tools* app (`14d82eec-204b-4c2f-b7e8-296a70dab67e`) has "assignment required"
-  set and the operator was not assigned. Getting past it needs an admin
-  assignment to that app, or a dedicated Entra app registration with delegated
-  `Files.Read.All`.
+- **SharePoint via Microsoft Graph** (`-KeyUrl`). Blocked by tenant policy, not
+  by the code: a real attempt returned **AADSTS50105** — the *Microsoft Graph
+  Command Line Tools* app (`14d82eec-204b-4c2f-b7e8-296a70dab67e`) has
+  "assignment required" set and the operator was not assigned. Getting past it
+  needs an admin assignment to that app, or a dedicated Entra app registration
+  with delegated `Files.Read.All`.
 - **A shared key file by path** (`-KeyPath`), covering a network drive, a UNC
-  share, or SharePoint over WebDAV. Removed as unused once the decision was to
-  keep each operator's credential local.
+  share, or SharePoint over WebDAV. No Entra app needed — Windows authenticates
+  as the caller.
+- **A DPAPI-encrypted local file** written by `Set-AbsoluteCredential.ps1`,
+  which decrypted only for the account and machine that wrote it, so a copied
+  file was inert.
 
-The trade being made: a shared key file gives central rotation and revocation,
-which DPAPI cannot. DPAPI gives a credential that is inert if copied, which a
-shared file cannot. With one operator, local is the simpler correct answer.
+The trade, if any of them is ever wanted back: a **shared file** gives central
+rotation and revocation. **DPAPI** gives a credential that survives being
+copied without being usable. **Environment variables** give neither, and are
+the simplest thing that still keeps the secret out of the script.
 
-### What each control actually buys
+### What actually protects the token
 
-- **Approved IP Addresses** (set on the token in Absolute) — a leaked key is
-  useless off the corporate network. The single biggest win, and independent of
-  everything above.
-- **DPAPI** — a leaked *file* is inert. Does not give revocation or audit.
-- **Token expiry** — bounded lifetime regardless. Currently Jan 7, 2027.
+**Approved IP Addresses**, set on the token in Absolute. A leaked key stops
+working outside the corporate network. That control is independent of every
+storage decision above and does more than any of them. Token expiry (currently
+Jan 7, 2027) bounds the damage regardless.
 
 ## Absolute API — verified facts
 
@@ -186,8 +188,6 @@ publisher string. Match on `appName`.
   `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
   Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
   in the script.
-- `Set-AbsoluteCredential.ps1` — one-time per-user credential setup.
-  `[-Path <path>]` `[-Remove]`. Windows only, by design.
 - `Test-AppFilter.ps1` — asserts both normalizers, loads the rules file, and
   classifies two real device inventories against the bucket a human confirmed
   for each. Lifts the functions out with the parser, so it never calls the API

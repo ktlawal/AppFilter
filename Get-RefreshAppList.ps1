@@ -57,23 +57,16 @@ param(
     # <serial>-InstallList.html unless a path is given here or -NoSheet is set.
     [string]$OutputHtml,
 
-    [switch]$NoSheet,
-
-    # Where the Absolute credential comes from. Auto tries the environment
-    # first, then the local DPAPI file.
-    [ValidateSet('Auto', 'Environment', 'Local')]
-    [string]$CredentialSource = 'Auto'
+    [switch]$NoSheet
 )
 
 # --- CONFIGURATION -------------------------------------------------
 $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
 
-# No credentials here, deliberately. They are loaded per-user at run time by
-# Get-AbsoluteCredential below, from a DPAPI-protected file written once by
-# Set-AbsoluteCredential.ps1. That keeps this file safe to sign, share,
-# screen-share and commit.
-$CredentialPath = $null   # override for testing; $null resolves to APPDATA
+# No credentials here, deliberately. They come from the environment at run
+# time - see Get-AbsoluteCredential below. That keeps this file safe to sign,
+# share, screen-share and commit.
 # -------------------------------------------------------------------
 
 
@@ -88,77 +81,47 @@ function ConvertTo-Base64Url {
 
 function Get-AbsoluteCredential {
     <#
-        Resolves the token ID and secret for this run, trying each source in
-        turn and reporting which one answered.
+        Returns the token ID and secret for this run, from the environment.
 
-            Environment  ABSOLUTE_TOKEN_ID + ABSOLUTE_SECRET_KEY. The hook a
-                         server, container or scheduled task uses.
-            Local        The DPAPI file written by Set-AbsoluteCredential.ps1.
-                         Decrypts only for the account and machine that wrote
-                         it, so a copied file is inert.
+        Nothing is stored on disk by this tool. Set the two variables for your
+        Windows account once and they persist across sessions:
+
+            [Environment]::SetEnvironmentVariable('ABSOLUTE_TOKEN_ID', '<id>', 'User')
+            [Environment]::SetEnvironmentVariable('ABSOLUTE_SECRET_KEY', '<secret>', 'User')
+
+        Note what that does and does not give you: user-scoped variables live
+        in the registry under HKCU and are readable by anything running as you.
+        They keep the secret out of this file and out of anything you share -
+        they are not protection against code already running as your account.
     #>
-    param(
-        [string]$Path,
-        [ValidateSet('Auto', 'Environment', 'Local')]
-        [string]$Source = 'Auto'
-    )
 
-    $tried = [System.Collections.Generic.List[string]]::new()
-
-    # --- environment ----------------------------------------------------
-    if ($Source -in 'Auto', 'Environment') {
-        if ($env:ABSOLUTE_TOKEN_ID -and $env:ABSOLUTE_SECRET_KEY) {
-            return [pscustomobject]@{
-                TokenId   = $env:ABSOLUTE_TOKEN_ID
-                SecretKey = $env:ABSOLUTE_SECRET_KEY
-                Source    = 'environment'
-            }
+    if ($env:ABSOLUTE_TOKEN_ID -and $env:ABSOLUTE_SECRET_KEY) {
+        return [pscustomobject]@{
+            TokenId   = $env:ABSOLUTE_TOKEN_ID
+            SecretKey = $env:ABSOLUTE_SECRET_KEY
+            Source    = 'environment'
         }
-        $tried.Add('environment (ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY not set)')
     }
 
-    # --- local DPAPI file ----------------------------------------------
-    if ($Source -in 'Auto', 'Local') {
-
-        if (-not $Path) {
-            if (-not $env:APPDATA) {
-                throw "No credential found, and APPDATA is not set so the local default location cannot be resolved. Tried: $($tried -join '; ')."
-            }
-            $Path = Join-Path $env:APPDATA 'AppFilter\absolute.cred.xml'
-        }
-
-        if (Test-Path $Path) {
-            try {
-                $cred = Import-Clixml -Path $Path -ErrorAction Stop
-            }
-            catch {
-                # Two causes look the same from here: a file copied from another
-                # machine or profile (DPAPI refuses it - which is the point), or a
-                # corrupt file. Name both rather than asserting the wrong one.
-                throw "Could not read the stored credential at $Path. If it was copied from another machine or user profile it cannot be decrypted here; it may also be corrupt. Re-run .\Set-AbsoluteCredential.ps1 on this machine. ($($_.Exception.Message))"
-            }
-
-            if ($cred -isnot [System.Management.Automation.PSCredential]) {
-                throw "$Path is not a stored credential. Re-run .\Set-AbsoluteCredential.ps1."
-            }
-
-            return [pscustomobject]@{
-                TokenId   = $cred.UserName
-                SecretKey = $cred.GetNetworkCredential().Password
-                Source    = $Path
-            }
-        }
-        $tried.Add("local file ($Path not found)")
-    }
+    $missing = @(
+        if (-not $env:ABSOLUTE_TOKEN_ID)   { 'ABSOLUTE_TOKEN_ID' }
+        if (-not $env:ABSOLUTE_SECRET_KEY) { 'ABSOLUTE_SECRET_KEY' }
+    ) -join ' and '
 
     throw @"
-No Absolute credential found. Tried: $($tried -join '; ').
+No Absolute credential found - $missing not set.
 
-Either store one on this machine:
+Set them for this session:
 
-    .\Set-AbsoluteCredential.ps1
+    `$env:ABSOLUTE_TOKEN_ID  = '<token id>'
+    `$env:ABSOLUTE_SECRET_KEY = '<secret>'
 
-or set ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY in the environment.
+Or once, so they persist for your account:
+
+    [Environment]::SetEnvironmentVariable('ABSOLUTE_TOKEN_ID', '<token id>', 'User')
+    [Environment]::SetEnvironmentVariable('ABSOLUTE_SECRET_KEY', '<secret>', 'User')
+
+Open a new PowerShell window after setting them that way.
 "@
 }
 
@@ -699,7 +662,7 @@ function Save-InstallSheet {
 #  Credentials
 # ------------------------------------------------------------------
 # Fail here, before the operator is asked to type anything.
-$credential = Get-AbsoluteCredential -Path $CredentialPath -Source $CredentialSource
+$credential = Get-AbsoluteCredential
 $TokenId    = $credential.TokenId
 $SecretKey  = $credential.SecretKey
 Write-Verbose "Credential loaded from $($credential.Source)."
