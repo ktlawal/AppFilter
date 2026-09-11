@@ -206,6 +206,12 @@ publisher string. Match on `appName`.
 
 ## PowerShell gotchas already hit (don't reintroduce)
 
+- **`[IO.Path]::GetFullPath($path, $base)` is .NET Core only.** The
+  two-argument overload does not exist in Windows PowerShell 5.1, which runs
+  on .NET Framework — it fails with "Cannot find an overload for GetFullPath
+  and the argument count: 2". Branch on `[IO.Path]::IsPathRooted()` and use
+  `Join-Path` instead; that works on both. Hit for real when the script was
+  run under 5.1 rather than 7.
 - **An unquoted URL with `&` is two commands.** `-KeyUrl https://...?a=1&e=x`
   runs `-KeyUrl https://...?a=1` and then tries to execute `e=x`. Always quote.
 

@@ -868,7 +868,15 @@ function Save-InstallSheet {
 
     # Resolve against the caller's location WITHOUT mangling an already-absolute
     # path - Join-Path would happily glue two roots together.
-    $full = [IO.Path]::GetFullPath($Path, (Get-Location).Path)
+    #
+    # The two-argument GetFullPath($path, $base) is .NET Core only, so it does
+    # not exist in Windows PowerShell 5.1. Branch on IsPathRooted instead,
+    # which works on both.
+    $full = if ([IO.Path]::IsPathRooted($Path)) {
+        [IO.Path]::GetFullPath($Path)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path (Get-Location).ProviderPath $Path))
+    }
     $dir  = Split-Path -Parent $full
     if ($dir -and -not (Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
