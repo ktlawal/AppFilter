@@ -14,8 +14,9 @@ installs (Intune group membership) is a possible later phase.
 
 - Windows, PowerShell 7 (NOT 5.1 — error handling differs, see gotchas)
 - Working dir: `D:\AbsoluteApplicationList`
-- Absolute API token ID + secret are **not** in any script. Each operator
-  stores their own once with `Set-AbsoluteCredential.ps1`; see Credentials.
+- Absolute API token ID + secret are **not** in any script. They come from the
+  `ABSOLUTE_TOKEN_ID` / `ABSOLUTE_SECRET_KEY` environment variables; see
+  Credentials.
 
 ## Credentials
 
