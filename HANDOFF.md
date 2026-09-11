@@ -25,48 +25,12 @@ token at run time from the first source that answers:
 | Order | Source | How |
 |---|---|---|
 | 1 | **Environment** | `ABSOLUTE_TOKEN_ID` + `ABSOLUTE_SECRET_KEY`, if both are set. The hook a server, container or scheduled task uses. |
-| 2 | **File** | `-KeyPath` pointing at the key file on a network drive, a UNC share, or SharePoint over WebDAV. Windows authenticates as the caller; the share's own permissions decide. **No Entra app registration needed.** |
-| 3 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
+| 2 | **Local** | `%APPDATA%\AppFilter\absolute.cred.xml`, written once by `Set-AbsoluteCredential.ps1`. |
 
-`-CredentialSource` pins one of `Auto` (the table above), `Environment`,
-`File` or `Local`. Pinning `SharePoint` makes a failure fatal instead of
-falling through — use it when you want to be certain the shared copy is what
-ran.
+`-CredentialSource` pins one of `Auto` (the table above), `Environment` or
+`Local`.
 
-**File is tried before the local one on purpose.** If the local copy won,
-someone removed from the group would keep working off their cached credential
-and revocation would mean nothing.
-
-### The shared key file
-
-```json
-{ "tokenId": "a1c16ebf-...", "secretKey": "..." }
-```
-
-Plain JSON, or base64 of that JSON — the script detects which. Base64 stops a
-preview pane or a passing glance rendering the secret. It is **obfuscation, not
-encryption**: anyone who can read the file can decode it in one command. What
-protects it is the share or library permissions.
-
-`-KeyPath` takes any path Windows can reach:
-
-    \\server\ITTools$\absolute.json
-    \\contoso.sharepoint.com@SSL\DavWWWRoot\sites\IT\Shared Documents\Keys\absolute.json
-
-The second form is SharePoint over WebDAV, which needs no Entra app
-registration — Windows authenticates as the caller.
-
-**Microsoft Graph was tried and removed.** A real attempt returned
-**AADSTS50105**: the *Microsoft Graph Command Line Tools* app
-(`14d82eec-204b-4c2f-b7e8-296a70dab67e`) has "assignment required" set in this
-tenant and the operator was not assigned, so `Connect-MgGraph` is blocked
-outright. That is tenant policy, not a code problem. Getting past it needs
-either an admin assignment to that app, or a dedicated Entra app registration
-with delegated `Files.Read.All` — neither of which had landed, so the Graph
-code was taken back out rather than left as dead weight. The commit history
-has it if it is ever wanted back.
-
-### The local DPAPI file### The local DPAPI file
+### The local DPAPI file
 
 A `PSCredential` exported with `Export-Clixml`, so the secret is encrypted with
 **DPAPI under the current user**. Copy it to another machine, another profile,
@@ -79,13 +43,30 @@ DPAPI is a Windows facility; elsewhere PowerShell still writes the file, but the
 recovers it with a single `Import-Clixml`. Writing that would look protected and
 would not be, so the script errors instead.
 
+### Two shared-key routes were built and removed
+
+Both worked as designed and both were taken out rather than left as dead code.
+The commit history has them if they are ever wanted back.
+
+- **SharePoint via Microsoft Graph.** Blocked by tenant policy, not by the code:
+  a real attempt returned **AADSTS50105** — the *Microsoft Graph Command Line
+  Tools* app (`14d82eec-204b-4c2f-b7e8-296a70dab67e`) has "assignment required"
+  set and the operator was not assigned. Getting past it needs an admin
+  assignment to that app, or a dedicated Entra app registration with delegated
+  `Files.Read.All`.
+- **A shared key file by path** (`-KeyPath`), covering a network drive, a UNC
+  share, or SharePoint over WebDAV. Removed as unused once the decision was to
+  keep each operator's credential local.
+
+The trade being made: a shared key file gives central rotation and revocation,
+which DPAPI cannot. DPAPI gives a credential that is inert if copied, which a
+shared file cannot. With one operator, local is the simpler correct answer.
+
 ### What each control actually buys
 
 - **Approved IP Addresses** (set on the token in Absolute) — a leaked key is
   useless off the corporate network. The single biggest win, and independent of
   everything above.
-- **SharePoint folder** — central rotation, real revocation, an access trail.
-  Does not stop a group member keeping a copy.
 - **DPAPI** — a leaked *file* is inert. Does not give revocation or audit.
 - **Token expiry** — bounded lifetime regardless. Currently Jan 7, 2027.
 

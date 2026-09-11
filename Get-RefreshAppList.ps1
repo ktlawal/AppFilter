@@ -59,18 +59,10 @@ param(
 
     [switch]$NoSheet,
 
-    # Where the Absolute credential comes from. Auto tries each source in
-    # turn: environment, then -KeyPath if given, then the local DPAPI file.
-    [ValidateSet('Auto', 'Environment', 'File', 'Local')]
-    [string]$CredentialSource = 'Auto',
-
-    # Path to the key file, read straight off the filesystem. Works for a
-    # network drive, a UNC share, or SharePoint over WebDAV:
-    #   \\server\ITTools$\absolute.json
-    #   \\contoso.sharepoint.com@SSL\DavWWWRoot\sites\IT\Shared Documents\Keys\absolute.json
-    # Needs no Entra app registration - Windows authenticates as you, and the
-    # share or library permissions decide whether you get the file.
-    [string]$KeyPath
+    # Where the Absolute credential comes from. Auto tries the environment
+    # first, then the local DPAPI file.
+    [ValidateSet('Auto', 'Environment', 'Local')]
+    [string]$CredentialSource = 'Auto'
 )
 
 # --- CONFIGURATION -------------------------------------------------
@@ -94,44 +86,6 @@ function ConvertTo-Base64Url {
     [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
-function ConvertFrom-CredentialPayload {
-    <#
-        Turns the stored key file into a token ID and secret.
-
-        Accepts JSON, or base64 of that JSON - so the file can be made
-        unreadable at a glance without the script needing to be told which
-        it is. Base64 is obfuscation against shoulder-surfing and preview
-        panes, NOT encryption: anyone who can read the file can decode it.
-        The access control on the folder is what actually protects it.
-    #>
-    param([Parameter(Mandatory)][string]$Text)
-
-    $raw = $Text.Trim()
-    if (-not $raw) { throw "The key file is empty." }
-
-    # A base64 blob has no braces; try decoding before giving up on it.
-    if ($raw -notmatch '[{}]') {
-        try {
-            $decoded = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($raw))
-            if ($decoded -match '[{}]') { $raw = $decoded }
-        } catch {
-            # Not base64 either - fall through and let the JSON parse complain.
-        }
-    }
-
-    try   { $data = $raw | ConvertFrom-Json -ErrorAction Stop }
-    catch { throw "The key file is neither JSON nor base64-encoded JSON. ($($_.Exception.Message))" }
-
-    $tokenId   = $data.tokenId
-    $secretKey = $data.secretKey
-
-    if (-not $tokenId -or -not $secretKey) {
-        throw "The key file must contain both 'tokenId' and 'secretKey'."
-    }
-
-    [pscustomobject]@{ TokenId = "$tokenId".Trim(); SecretKey = "$secretKey".Trim() }
-}
-
 function Get-AbsoluteCredential {
     <#
         Resolves the token ID and secret for this run, trying each source in
@@ -139,24 +93,13 @@ function Get-AbsoluteCredential {
 
             Environment  ABSOLUTE_TOKEN_ID + ABSOLUTE_SECRET_KEY. The hook a
                          server, container or scheduled task uses.
-            File         A key file on a network drive, a UNC share, or
-                         SharePoint over WebDAV. Windows authenticates as the
-                         caller and the share's permissions decide. This is the
-                         source of truth when it is configured: rotating means
-                         editing one file, and losing access to the share stops
-                         you on the next run.
             Local        The DPAPI file written by Set-AbsoluteCredential.ps1.
                          Decrypts only for the account and machine that wrote
                          it, so a copied file is inert.
-
-        File is tried BEFORE the local one on purpose. If the local copy won,
-        someone who had lost access to the share would keep working off a cache
-        and revocation would mean nothing.
     #>
     param(
         [string]$Path,
-        [string]$KeyPath,
-        [ValidateSet('Auto', 'Environment', 'File', 'Local')]
+        [ValidateSet('Auto', 'Environment', 'Local')]
         [string]$Source = 'Auto'
     )
 
@@ -172,38 +115,6 @@ function Get-AbsoluteCredential {
             }
         }
         $tried.Add('environment (ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY not set)')
-    }
-
-    # --- shared file: network drive, UNC share, or SharePoint over WebDAV -
-    # Tried before Graph because it needs no app registration and no sign-in
-    # prompt: Windows authenticates as the caller and the share's own
-    # permissions decide the outcome.
-    if ($Source -in 'Auto', 'File') {
-        if ($KeyPath) {
-            Write-Verbose "Reading credential from $KeyPath"
-            try {
-                $payload = ConvertFrom-CredentialPayload -Text (Get-Content -Path $KeyPath -Raw -ErrorAction Stop)
-                return [pscustomobject]@{
-                    TokenId   = $payload.TokenId
-                    SecretKey = $payload.SecretKey
-                    Source    = "file ($KeyPath)"
-                }
-            }
-            catch {
-                if ($Source -eq 'File') { throw }
-                $reason = ($_.Exception.Message -replace '\s+', ' ').Trim()
-                if ($reason.Length -gt 160) { $reason = $reason.Substring(0, 160) + '...' }
-                Write-Warning "Could not read the credential from $KeyPath."
-                Write-Warning $reason
-                $tried.Add("file (failed: $reason)")
-            }
-        }
-        elseif ($Source -eq 'File') {
-            throw "-CredentialSource File needs -KeyPath to point at the key file."
-        }
-        else {
-            $tried.Add('file (no -KeyPath given)')
-        }
     }
 
     # --- local DPAPI file ----------------------------------------------
@@ -246,10 +157,6 @@ No Absolute credential found. Tried: $($tried -join '; ').
 Either store one on this machine:
 
     .\Set-AbsoluteCredential.ps1
-
-or point at the shared key file:
-
-    .\Get-RefreshAppList.ps1 <serial> -KeyPath '\\server\share\absolute.json'
 
 or set ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY in the environment.
 "@
@@ -792,7 +699,7 @@ function Save-InstallSheet {
 #  Credentials
 # ------------------------------------------------------------------
 # Fail here, before the operator is asked to type anything.
-$credential = Get-AbsoluteCredential -Path $CredentialPath -KeyPath $KeyPath -Source $CredentialSource
+$credential = Get-AbsoluteCredential -Path $CredentialPath -Source $CredentialSource
 $TokenId    = $credential.TokenId
 $SecretKey  = $credential.SecretKey
 Write-Verbose "Credential loaded from $($credential.Source)."

@@ -26,8 +26,7 @@ if ($errors) {
     throw "Get-RefreshAppList.ps1 does not parse."
 }
 foreach ($name in 'ConvertTo-NormalizedAppName', 'ConvertTo-NormalizedPublisher',
-                  'Import-AppRule', 'Get-AppClassification',
-                  'ConvertFrom-CredentialPayload') {
+                  'Import-AppRule', 'Get-AppClassification') {
     $fn = $ast.FindAll({ param($n)
         $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)[0]
     if (-not $fn) { throw "Function $name not found in the script." }
@@ -155,29 +154,6 @@ Assert-Class 'Tanium Client 7.9.2.1'  'Tanium'                     'Base image'
 Assert-Class 'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33130' 'Microsoft' 'Base image'
 Assert-Class 'Intel(R) Wireless Bluetooth(R)' 'Intel Corporation'  'Driver / OEM'
 Assert-Class 'Realtek High Definition Audio'  'Realtek Semiconductor Corp.' 'Driver / OEM'
-
-Write-Host "`nKey file parsing" -ForegroundColor Cyan
-function Assert-Payload {
-    param($Text, $WantId, $Label)
-    try { $got = ConvertFrom-CredentialPayload -Text $Text }
-    catch {
-        $script:failures++
-        Write-Host -ForegroundColor Red "  FAIL  $Label threw: $($_.Exception.Message)"
-        return
-    }
-    if ($got.TokenId -ceq $WantId) { Write-Host "  PASS  $Label" }
-    else { $script:failures++; Write-Host -ForegroundColor Red "  FAIL  $Label gave '$($got.TokenId)'" }
-}
-
-$json = '{"tokenId":"a1c16ebf-1234","secretKey":"s3cr3t"}'
-Assert-Payload $json 'a1c16ebf-1234' 'plain JSON'
-Assert-Payload ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))) 'a1c16ebf-1234' 'base64 JSON'
-Assert-Payload "  $json  `n" 'a1c16ebf-1234' 'JSON with surrounding whitespace'
-
-foreach ($bad in @('', '   ', 'hello world', '{"tokenId":"only-an-id"}', '{"secretKey":"only-a-secret"}')) {
-    try   { [void](ConvertFrom-CredentialPayload -Text $bad); $failures++; Write-Host -ForegroundColor Red "  FAIL  accepted '$bad'" }
-    catch { Write-Host "  PASS  rejected '$(if($bad.Trim()){$bad}else{'<empty>'})'" }
-}
 
 Write-Host ""
 if ($failures -eq 0) { Write-Host "All cases passed." -ForegroundColor Green }
