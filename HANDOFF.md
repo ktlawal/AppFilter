@@ -14,36 +14,40 @@ installs (Intune group membership) is a possible later phase.
 
 - Windows, PowerShell 7 (NOT 5.1 — error handling differs, see gotchas)
 - Working dir: `D:\AbsoluteApplicationList`
-- Absolute API token ID + secret are **not** in any script. They come from the
-  `ABSOLUTE_TOKEN_ID` / `ABSOLUTE_SECRET_KEY` environment variables; see
+- Absolute API token ID + secret are pasted into the top of
+  `Get-RefreshAppList.ps1`, with environment variables as a fallback; see
   Credentials.
 
 ## Credentials
 
-Nothing sensitive lives in the repo, and the tool stores nothing on disk. The
-token comes from two environment variables:
+The token ID and secret are pasted into the top of `Get-RefreshAppList.ps1`.
+If those are left as the `TOKEN HERE` / `KEY HERE` placeholders, the script
+falls back to `ABSOLUTE_TOKEN_ID` and `ABSOLUTE_SECRET_KEY` from the
+environment — which is how a server or scheduled task would supply it without
+the file carrying the key.
 
-    ABSOLUTE_TOKEN_ID
-    ABSOLUTE_SECRET_KEY
+The values in the file win when they are filled in. A recipient's leftover
+environment variables should not quietly take over from the copy the
+distributor intended them to use. `-Verbose` reports which source answered.
 
-Set them for the session, or once for your Windows account:
+**This is a deliberate step back, taken so the tool can be handed to the team
+before a shared-credential story exists.** What it means in practice:
 
-```powershell
-[Environment]::SetEnvironmentVariable('ABSOLUTE_TOKEN_ID',  '<id>',     'User')
-[Environment]::SetEnvironmentVariable('ABSOLUTE_SECRET_KEY','<secret>', 'User')
-```
+- **The script file *is* the credential.** Do not screen-share it, attach it to
+  a ticket, put it on a flash drive that leaves the building, or commit it.
+- **Rotation means redistribution.** Changing the key means getting a new copy
+  of the file to everyone who has one. Note the token expires **Jan 7, 2027**.
+- **There is no attribution.** Every call from every copy looks identical in
+  Absolute's logs. If it leaks, you cannot tell whose copy.
+- **Anyone holding the file can read the key**, so this only ever makes sense
+  for people already trusted with the tenant's inventory data.
 
-Open a new PowerShell window afterwards. Missing either one gives an error that
-names which.
+**Approved IP Addresses on the token is therefore no longer optional.** It is
+the only remaining control that limits what a leaked copy can do: restrict the
+token to the corporate egress range and the key stops working anywhere else.
+Set it in the Absolute console, under the token's API Management page.
 
-Be clear on what this does and does not buy. It keeps the secret out of the
-script, so the file is safe to sign, share, screen-share and commit. User-scoped
-variables live in the registry under `HKCU\Environment` in plaintext, readable
-by anything running as that account — so this is not protection against code
-already running as you, and a `Get-ChildItem Env:` in a shared screen will show
-it.
-
-### Three richer routes were built and removed
+### Three richer routes were built and removed### Three richer routes were built and removed
 
 All three worked. They came out as the scope narrowed to a single operator, and
 the commit history has each of them.
@@ -62,9 +66,11 @@ the commit history has each of them.
   file was inert.
 
 The trade, if any of them is ever wanted back: a **shared file** gives central
-rotation and revocation. **DPAPI** gives a credential that survives being
-copied without being usable. **Environment variables** give neither, and are
-the simplest thing that still keeps the secret out of the script.
+rotation and revocation. **DPAPI** gives a credential that is inert if copied.
+**Environment variables** give neither but keep the secret out of the script.
+The key in the script, where it is now, gives none of the three — it is the
+simplest thing that works for distribution today, and the first thing to
+revisit when there is somewhere better to put it.
 
 ### What actually protects the token
 

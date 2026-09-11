@@ -61,12 +61,22 @@ param(
 )
 
 # --- CONFIGURATION -------------------------------------------------
+#
+#  >> THIS FILE CONTAINS THE ABSOLUTE API KEY. <<
+#
+#  Anyone who has this file has the key, and it works from any internet
+#  connection unless the token is restricted to approved IP addresses in the
+#  Absolute console. Do not screen-share it, attach it to a ticket, or commit
+#  it anywhere. Rotating the key means redistributing this file to everyone.
+#
+#  Leave these as-is and the script falls back to the ABSOLUTE_TOKEN_ID and
+#  ABSOLUTE_SECRET_KEY environment variables instead.
+#
+$TokenId   = "TOKEN HERE"
+$SecretKey = "KEY HERE"
+
 $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
-
-# No credentials here, deliberately. They come from the environment at run
-# time - see Get-AbsoluteCredential below. That keeps this file safe to sign,
-# share, screen-share and commit.
 # -------------------------------------------------------------------
 
 
@@ -81,19 +91,28 @@ function ConvertTo-Base64Url {
 
 function Get-AbsoluteCredential {
     <#
-        Returns the token ID and secret for this run, from the environment.
+        Returns the token ID and secret for this run.
 
-        Nothing is stored on disk by this tool. Set the two variables for your
-        Windows account once and they persist across sessions:
+        The values at the top of this file win when they have been filled in.
+        A recipient's leftover environment variables should not quietly take
+        over from the copy the distributor intended them to use.
 
-            [Environment]::SetEnvironmentVariable('ABSOLUTE_TOKEN_ID', '<id>', 'User')
-            [Environment]::SetEnvironmentVariable('ABSOLUTE_SECRET_KEY', '<secret>', 'User')
-
-        Note what that does and does not give you: user-scoped variables live
-        in the registry under HKCU and are readable by anything running as you.
-        They keep the secret out of this file and out of anything you share -
-        they are not protection against code already running as your account.
+        Environment variables are the fallback, so a server or scheduled task
+        can supply the key without this file carrying it.
     #>
+    param([string]$TokenId, [string]$SecretKey)
+
+    $placeholder = @('TOKEN HERE', 'KEY HERE')
+
+    if ($TokenId -and $SecretKey -and
+        $TokenId   -notin $placeholder -and
+        $SecretKey -notin $placeholder) {
+        return [pscustomobject]@{
+            TokenId   = $TokenId.Trim()
+            SecretKey = $SecretKey.Trim()
+            Source    = 'script'
+        }
+    }
 
     if ($env:ABSOLUTE_TOKEN_ID -and $env:ABSOLUTE_SECRET_KEY) {
         return [pscustomobject]@{
@@ -103,25 +122,18 @@ function Get-AbsoluteCredential {
         }
     }
 
-    $missing = @(
-        if (-not $env:ABSOLUTE_TOKEN_ID)   { 'ABSOLUTE_TOKEN_ID' }
-        if (-not $env:ABSOLUTE_SECRET_KEY) { 'ABSOLUTE_SECRET_KEY' }
-    ) -join ' and '
-
     throw @"
-No Absolute credential found - $missing not set.
+No Absolute credential found.
 
-Set them for this session:
+Either fill in the two values at the top of this script:
 
-    `$env:ABSOLUTE_TOKEN_ID  = '<token id>'
+    `$TokenId   = "..."
+    `$SecretKey = "..."
+
+or set them in the environment instead:
+
+    `$env:ABSOLUTE_TOKEN_ID   = '<token id>'
     `$env:ABSOLUTE_SECRET_KEY = '<secret>'
-
-Or once, so they persist for your account:
-
-    [Environment]::SetEnvironmentVariable('ABSOLUTE_TOKEN_ID', '<token id>', 'User')
-    [Environment]::SetEnvironmentVariable('ABSOLUTE_SECRET_KEY', '<secret>', 'User')
-
-Open a new PowerShell window after setting them that way.
 "@
 }
 
@@ -662,7 +674,7 @@ function Save-InstallSheet {
 #  Credentials
 # ------------------------------------------------------------------
 # Fail here, before the operator is asked to type anything.
-$credential = Get-AbsoluteCredential
+$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey
 $TokenId    = $credential.TokenId
 $SecretKey  = $credential.SecretKey
 Write-Verbose "Credential loaded from $($credential.Source)."
