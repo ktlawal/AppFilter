@@ -155,6 +155,57 @@ Assert-Class 'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33130
 Assert-Class 'Intel(R) Wireless Bluetooth(R)' 'Intel Corporation'  'Driver / OEM'
 Assert-Class 'Realtek High Definition Audio'  'Realtek Semiconductor Corp.' 'Driver / OEM'
 
+Write-Host "`nAPI response envelope" -ForegroundColor Cyan
+# A one-page result carries metadata with NO pagination property. Reading it
+# as if it were always there is what broke the first real run after the module
+# split, so every level is asserted here - no network needed.
+function Assert-Envelope {
+    param($Label, $Got, $Want)
+    if ("$Got" -ceq "$Want") {
+        Write-Host ("  PASS  {0,-52} -> '{1}'" -f $Label, $Got)
+    } else {
+        $script:failures++
+        Write-Host -ForegroundColor Red ("  FAIL  {0,-52} -> '{1}'  wanted '{2}'" -f $Label, $Got, $Want)
+    }
+}
+
+# The shape Absolute actually returns on a single page: metadata, no pagination.
+$onePage = [pscustomobject]@{ data = @(1, 2, 3); metadata = [pscustomobject]@{ } }
+Assert-Envelope 'one page: rows'        (Get-PageData $onePage).Count      3
+Assert-Envelope 'one page: next token'  (Get-NextPageToken $onePage)       ''
+
+# Envelope with no metadata property at all.
+$bare = [pscustomobject]@{ data = @(1) }
+Assert-Envelope 'no metadata: rows'     (Get-PageData $bare).Count         1
+Assert-Envelope 'no metadata: next'     (Get-NextPageToken $bare)          ''
+
+# metadata.pagination present but carrying no nextPage - the last page.
+$lastPage = [pscustomobject]@{ data = @(1); metadata = [pscustomobject]@{ pagination = [pscustomobject]@{ } } }
+Assert-Envelope 'last page: next'       (Get-NextPageToken $lastPage)      ''
+
+# A real continuation token has to come back intact.
+$more = [pscustomobject]@{ data = @(1); metadata = [pscustomobject]@{ pagination = [pscustomobject]@{ nextPage = 'AbC123==' } } }
+Assert-Envelope 'more pages: next'      (Get-NextPageToken $more)          'AbC123=='
+
+# An empty-string token means done, not "fetch page ''" forever.
+$blank = [pscustomobject]@{ data = @(); metadata = [pscustomobject]@{ pagination = [pscustomobject]@{ nextPage = '' } } }
+Assert-Envelope 'blank token: next'     (Get-NextPageToken $blank)         ''
+
+# An empty page must stay empty. This is the one that matters: if `data = @()`
+# falls through to "treat the envelope as a row", a serial that matches no
+# device comes back as one nonsense device instead of a clean "not found".
+$emptyPage = [pscustomobject]@{ data = @(); metadata = [pscustomobject]@{ } }
+Assert-Envelope 'empty page: rows'      (Get-PageData $emptyPage).Count    0
+
+# An unwrapped response is its own single row.
+Assert-Envelope 'unwrapped: rows'       (Get-PageData ([pscustomobject]@{ appName = 'x' })).Count 1
+Assert-Envelope 'null response: rows'   (Get-PageData $null).Count         0
+
+# Optional fields on a row are absent, not empty - an app with no scan date.
+$row = [pscustomobject]@{ appName = 'Thing' }
+Assert-Envelope 'missing field is null' (Get-DataProperty $row 'lastScanDateTimeUtc') ''
+Assert-Envelope 'present field reads'   (Get-DataProperty $row 'appName')  'Thing'
+
 Write-Host "`nHTML escaping" -ForegroundColor Cyan
 # The server echoes a rejected serial back into value="...", so a bare quote
 # there would end the attribute and let a crafted link inject script into a

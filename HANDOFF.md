@@ -166,6 +166,28 @@ publisher string. Match on `appName`.
 
 ## PowerShell gotchas already hit (don't reintroduce)
 
+- **Do NOT put `Set-StrictMode` in `AppFilter.psm1`.** It was added during the
+  module split and broke the tool on the very first real run. Under StrictMode
+  reading a property that does not exist is a *terminating error*, and this
+  module reads a JSON API whose fields come and go: Absolute's envelope carries
+  `metadata` with **no `pagination` property** until there actually is a next
+  page, so every ordinary one-page result died on
+  `$response.metadata.pagination`. The same hazard applies to
+  `lastScanDateTimeUtc` on an app row and to every optional device field.
+  Missing-property-is-null is load-bearing. Read anything that came off the
+  wire through `Get-DataProperty`. There is a comment to this effect at the top
+  of the module; leave it there. Note the mock could not catch this because its
+  fixture used `metadata = $null` — **make a fixture match the real shape or it
+  proves nothing.**
+- **An empty array returned from a function collapses to `$null`.** So a field
+  holding `@()` is indistinguishable from an absent one once it has passed
+  through a `return`. This bit immediately after the fix above: `data = @()`
+  on a serial that matched nothing looked absent, fell through to the "response
+  is not wrapped" branch, and handed back **the envelope itself as if it were a
+  device** — the user saw "no application inventory" instead of "no device
+  matched". Where the difference matters, test
+  `$obj.PSObject.Properties['name']` for presence rather than looking at the
+  value, as `Get-PageData` does.
 - **No ternary `? :` and no `??`.** They are PowerShell 7 syntax. The target
   here is 7, but a lab machine may well be on stock 5.1, and a parse error
   takes the whole file down before a single line runs. `Start-RefreshAppServer.ps1`
@@ -207,7 +229,9 @@ publisher string. Match on `appName`.
 ## Files
 
 - `AppFilter.psm1` — **the engine, and the only place the logic lives.** Both
-  front ends import it. Exports the normalizers, `Import-AppRule`,
+  front ends import it. Exports `Get-DataProperty`, `Get-PageData` and
+  `Get-NextPageToken` for reading anything that came off the wire (see the
+  StrictMode gotcha), the normalizers, `Import-AppRule`,
   `Get-AppClassification`, `Add-AppRule`, `Get-AbsoluteCredential`,
   `Invoke-AbsoluteApi`, `Get-AbsoluteV3`, `Get-RefreshApps`,
   `New-InstallSheetHtml`, `ConvertTo-HtmlText`, `Save-InstallSheet`,
@@ -304,7 +328,10 @@ later touches `Import-AppRule` and nothing else.
 The logic now lives in `AppFilter.psm1` and there are two front ends over it:
 the console script and `Start-RefreshAppServer.ps1`. Both were exercised
 against a mocked API and agree exactly — 5 install candidates of 15 on the
-same fixture. `Test-AppFilter.ps1` passes all 64 cases.
+same fixture, and an unmatched serial gives a clean "no device matched" on
+both. `Test-AppFilter.ps1` passes all 76 cases, twelve of which pin the API
+envelope shapes so the StrictMode and empty-page failures above cannot come
+back without the network.
 
 The baseline has been rebuilt from real base-image devices. It has **not**
 been re-run against a live serial since — the last real run predates all of this (serial `4QXTTHR3`:

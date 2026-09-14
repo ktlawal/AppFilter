@@ -12,7 +12,58 @@
     it. Prompts, colours and tables belong to whoever is driving.
 #>
 
-Set-StrictMode -Version 2.0
+# NO Set-StrictMode HERE, AND DO NOT ADD ONE. It was tried and it broke the
+# tool on the first real run: under StrictMode, reading a property that does
+# not exist is a terminating error, and this module reads a JSON API whose
+# fields come and go. Absolute's envelope carries `metadata` with no
+# `pagination` until there actually is a next page, so a one-page result -
+# every normal result - died on `$response.metadata.pagination`. The same
+# applies to `lastScanDateTimeUtc` on an app row and every optional device
+# field. Missing-property-is-null is load-bearing here. Read optional fields
+# through Get-DataProperty below rather than reaching for StrictMode.
+
+function Get-DataProperty {
+    <#
+        Reads a property off an object parsed from JSON, returning $null when
+        it is absent rather than assuming the shape. Use this for anything
+        that came off the wire.
+    #>
+    param($Object, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Object) { return $null }
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $null }
+    return $prop.Value
+}
+# Note: this is for scalar fields. PowerShell collapses an empty array on the
+# way out of a function, so a field holding @() comes back as $null and you
+# cannot tell it from an absent one. Where that distinction matters - it does
+# for `data` - test PSObject.Properties directly, as Get-PageData does.
+
+function Get-PageData {
+    <# The rows out of one response, whether or not it is wrapped in `data`. #>
+    param($Response)
+    if ($null -eq $Response) { return @() }
+    # Presence of the property decides, not its contents: a `data` of @() is a
+    # real empty page and must stay empty. Going by the value instead made a
+    # device lookup that matched nothing hand back the envelope as if it were
+    # a device.
+    $prop = $Response.PSObject.Properties['data']
+    if ($null -ne $prop) { return @($prop.Value) }
+    return @($Response)
+}
+
+function Get-NextPageToken {
+    <#
+        The continuation token, or $null on the last page. It is nested two
+        levels down and every level is optional - see the note above.
+    #>
+    param($Response)
+    $metadata   = Get-DataProperty $Response   'metadata'
+    $pagination = Get-DataProperty $metadata   'pagination'
+    $next       = Get-DataProperty $pagination 'nextPage'
+    if ($next -is [string] -and $next.Trim() -eq '') { return $null }
+    return $next
+}
 
 function ConvertTo-Base64Url {
     param([byte[]]$Bytes)
@@ -404,13 +455,11 @@ function Get-AbsoluteV3 {
         $response = Invoke-AbsoluteApi -Uri $Uri -QueryString ($parts -join '&') `
                         -TokenId $TokenId -SecretKey $SecretKey -BaseUrl $BaseUrl
 
-        $batch = @( if ($null -ne $response.data) { $response.data } else { $response } )
-        foreach ($item in $batch) { if ($null -ne $item) { $results.Add($item) } }
-
-        $next = $null
-        if ($response.metadata -and $response.metadata.pagination) {
-            $next = $response.metadata.pagination.nextPage
+        foreach ($item in (Get-PageData $response)) {
+            if ($null -ne $item) { $results.Add($item) }
         }
+
+        $next = Get-NextPageToken $response
 
         $guard++
         if ($guard -gt 500) { Write-Warning "Pagination guard tripped."; break }
@@ -714,4 +763,5 @@ Export-ModuleMember -Function ConvertTo-NormalizedAppName, ConvertTo-NormalizedP
                               Import-AppRule, Get-AppClassification, Add-AppRule,
                               Get-AbsoluteCredential, Invoke-AbsoluteApi, Get-AbsoluteV3,
                               Get-RefreshApps, New-InstallSheetHtml, ConvertTo-HtmlText,
-                              Save-InstallSheet, Read-IndexSelection, ConvertTo-Base64Url
+                              Save-InstallSheet, Read-IndexSelection, ConvertTo-Base64Url,
+                              Get-DataProperty, Get-PageData, Get-NextPageToken
