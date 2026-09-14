@@ -159,6 +159,11 @@ Write-Host "`nAPI response envelope" -ForegroundColor Cyan
 # A one-page result carries metadata with NO pagination property. Reading it
 # as if it were always there is what broke the first real run after the module
 # split, so every level is asserted here - no network needed.
+#
+# Note the @() around every Get-PageData call. PowerShell unrolls a
+# single-element array on its way out of a function, and on Windows
+# PowerShell 5.1 the resulting scalar has no .Count at all (7 gives it one).
+# Without the wrapper this file passes on 7 and fails on 5.1.
 function Assert-Envelope {
     param($Label, $Got, $Want)
     if ("$Got" -ceq "$Want") {
@@ -171,12 +176,12 @@ function Assert-Envelope {
 
 # The shape Absolute actually returns on a single page: metadata, no pagination.
 $onePage = [pscustomobject]@{ data = @(1, 2, 3); metadata = [pscustomobject]@{ } }
-Assert-Envelope 'one page: rows'        (Get-PageData $onePage).Count      3
+Assert-Envelope 'one page: rows'        (@(Get-PageData $onePage)).Count      3
 Assert-Envelope 'one page: next token'  (Get-NextPageToken $onePage)       ''
 
 # Envelope with no metadata property at all.
 $bare = [pscustomobject]@{ data = @(1) }
-Assert-Envelope 'no metadata: rows'     (Get-PageData $bare).Count         1
+Assert-Envelope 'no metadata: rows'     (@(Get-PageData $bare)).Count         1
 Assert-Envelope 'no metadata: next'     (Get-NextPageToken $bare)          ''
 
 # metadata.pagination present but carrying no nextPage - the last page.
@@ -195,11 +200,11 @@ Assert-Envelope 'blank token: next'     (Get-NextPageToken $blank)         ''
 # falls through to "treat the envelope as a row", a serial that matches no
 # device comes back as one nonsense device instead of a clean "not found".
 $emptyPage = [pscustomobject]@{ data = @(); metadata = [pscustomobject]@{ } }
-Assert-Envelope 'empty page: rows'      (Get-PageData $emptyPage).Count    0
+Assert-Envelope 'empty page: rows'      (@(Get-PageData $emptyPage)).Count    0
 
 # An unwrapped response is its own single row.
-Assert-Envelope 'unwrapped: rows'       (Get-PageData ([pscustomobject]@{ appName = 'x' })).Count 1
-Assert-Envelope 'null response: rows'   (Get-PageData $null).Count         0
+Assert-Envelope 'unwrapped: rows'       (@(Get-PageData ([pscustomobject]@{ appName = 'x' }))).Count 1
+Assert-Envelope 'null response: rows'   (@(Get-PageData $null)).Count         0
 
 # Optional fields on a row are absent, not empty - an app with no scan date.
 $row = [pscustomobject]@{ appName = 'Thing' }

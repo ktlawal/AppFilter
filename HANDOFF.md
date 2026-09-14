@@ -12,7 +12,10 @@ installs (Intune group membership) is a possible later phase.
 
 ## Environment
 
-- Windows, PowerShell 7 (NOT 5.1 — error handling differs, see gotchas)
+- Windows. **Assume Windows PowerShell 5.1 unless you have checked.** The
+  working copy in `D:\PlayGround\Migration` is running 5.1 — its error format
+  (`+ CategoryInfo`) and its lack of `.Count` on a scalar gave it away. Write
+  for 5.1 and it also runs on 7; the reverse is not true.
 - Working dir: `D:\AbsoluteApplicationList`
 - Absolute API token ID + secret are pasted into the top of whichever front
   end is being run — `Get-RefreshAppList.ps1` or `Start-RefreshAppServer.ps1`
@@ -166,6 +169,16 @@ publisher string. Match on `appName`.
 
 ## PowerShell gotchas already hit (don't reintroduce)
 
+- **A single-element array unrolls on its way out of a function, and in 5.1
+  the resulting scalar has no `.Count`.** `return @($one)` gives the caller a
+  bare object. PowerShell 7 synthesises `.Count` = 1 for any scalar, 5.1 does
+  not — it returns nothing. So `(Get-PageData $x).Count` passed on 7 and
+  failed on 5.1. `foreach` over a scalar is fine, which is why only the test
+  broke. Wrap the call in `@()` when you need a count.
+- **`"$($x).Length"` prints `$x` followed by the literal text `.Length`.** The
+  subexpression closes at the paren. This shipped in a first draft of
+  `Debug-AbsoluteLookup.ps1` and printed the API secret to the console.
+  Compute into a variable first, and never interpolate a secret at all.
 - **Do NOT put `Set-StrictMode` in `AppFilter.psm1`.** It was added during the
   module split and broke the tool on the very first real run. Under StrictMode
   reading a property that does not exist is a *terminating error*, and this
@@ -254,6 +267,13 @@ publisher string. Match on `appName`.
   `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
   Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
   in the script.
+- `Debug-AbsoluteLookup.ps1` — run this when a lookup says "no device matched"
+  for a device you know exists. It prints the PowerShell version, which
+  credential source answered, and the raw response shape for both an
+  unfiltered device query and the failing serial. That separates a
+  wrong-tenant token, a token that cannot read devices, and a serial that
+  genuinely is not there — three causes that look identical from the tool.
+  It never prints the secret, only its length.
 - `Test-AppFilter.ps1` — asserts both normalizers and the HTML escaper, loads
   the rules file, and classifies two real device inventories against the bucket
   a human confirmed for each. It imports `AppFilter.psm1` and never calls the
