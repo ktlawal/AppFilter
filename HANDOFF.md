@@ -13,7 +13,7 @@ installs (Intune group membership) is a possible later phase.
 ## Environment
 
 - Windows. **Assume Windows PowerShell 5.1 unless you have checked.** The
-  working copy in `D:\PlayGround\Migration` is running 5.1 — its error format
+  working copy on the operator's machine is running 5.1 — its error format
   (`+ CategoryInfo`) and its lack of `.Count` on a scalar gave it away. Write
   for 5.1 and it also runs on 7; the reverse is not true.
 - Working dir: `D:\AbsoluteApplicationList`
@@ -354,6 +354,14 @@ both. `Test-AppFilter.ps1` passes all 76 cases, twelve of which pin the API
 envelope shapes so the StrictMode and empty-page failures above cannot come
 back without the network.
 
+**A serial that is not found may still be in Absolute under a suffixed name.**
+The tenant appends `_Moved` to the `serialNumber` of some devices — two of the
+first five returned by an unfiltered query had it. Exact-match lookup misses
+those, so a technician typing a serial off a sticker can get "no device
+matched" for a device that is there. Unconfirmed whether `_Moved` is a
+convention or coincidence; if it is a convention, the tool should retry on a
+partial match and offer the near match rather than giving up. Not built.
+
 The baseline has been rebuilt from real base-image devices. It has **not**
 been re-run against a live serial since — the last real run predates all of this (serial `4QXTTHR3`:
 75 apps, 58 excluded, 17 install candidates), so expect that count to move,
@@ -501,12 +509,26 @@ Behaviour worth knowing:
   prompt. PowerShell got in over NTLM; the browser was offered Negotiate, tried
   Kerberos with the typed credentials, found no `HTTP/<host>` SPN registered
   for the account running the listener, and re-prompted rather than falling
-  back. Three ways out, cheapest first: run with `-AuthScheme Ntlm`; add the
-  host to the Local intranet zone so browsers send default credentials
-  silently; or have a domain admin register the SPN
-  (`setspn -S HTTP/<host> DOMAIN\Account`). Running as `SYSTEM` under a
-  scheduled task sidesteps it entirely, because the machine account's SPN
-  already exists.
+  back. **Confirmed independently:** browsing the same server by its bare IP
+  authenticated first try. Browsers do not attempt Kerberos against an IP
+  literal — there is no name to derive an SPN from — so the IP forced the NTLM
+  fallback the hostname never reached. Four ways out, cheapest first: use the
+  IP; run with `-AuthScheme Ntlm`; add the host to the Local intranet zone so
+  browsers send default credentials silently; or have a domain admin register
+  the SPN (`setspn -S HTTP/<host> DOMAIN\Account`).
+
+  **The IP is a poor permanent answer** on two counts: the address moves
+  unless it is reserved, and a bare IP usually lands in the browser's Internet
+  zone, so technicians get a credential prompt every session rather than
+  silent sign-on — friction pushing directly against the ease-of-use this was
+  built for, and the thing that starts people asking to turn the auth off.
+
+  **Running as `SYSTEM` under the startup task is expected to fix it for
+  free**, because the machine account's own `HOST/<host>` SPN already covers
+  HTTP, so Kerberos works with no `setspn`, no domain admin and no registry
+  change. Not yet verified — verify it when the scheduled task goes in. That
+  task also needs its own reservation:
+  `netsh http add urlacl url=http://+:<port>/ user="NT AUTHORITY\SYSTEM"`.
 - **Windows Integrated authentication is the default.** Only domain accounts
   reach it, and `$context.User.Identity.Name` names the caller in the log, so
   every lookup is attributable — which the console tool, sharing one token
@@ -544,11 +566,29 @@ Behaviour worth knowing:
    service account, `pwsh -NoProfile -File ...\Start-RefreshAppServer.ps1`.
 5. Tell technicians `http://<machine>:5000/`.
 
-**Two things still unverified on the real machine**: whether an inbound
-firewall port can be opened on it at all, and whether the auto-start survives
-a reboot. Both are environment questions, not code ones. Everything else below
-was tested against a mocked API on this machine — all routes, the injection
-case, the log, and four concurrent requests.
+### Where this got to
+
+Steps 1-4 are done on the real machine. Confirmed working there: the inbound
+firewall rule (port filter attached, adapter `DomainAuthenticated`), the URL
+reservation with `Listen: Yes`, the listener itself, and Windows
+authentication — `Invoke-WebRequest -UseDefaultCredentials` returned 200 over
+both `localhost` and the machine's own hostname, and a browser signed in via
+the IP. The live API path is proven too: a real one-page response was read
+correctly, and `Get-NextPageToken` pulled a real continuation token out of a
+real envelope.
+
+**Next: step 5, the startup task**, run as `NT AUTHORITY\SYSTEM` — which is
+also the expected fix for the SPN problem above.
+
+**Still unverified:** whether the auto-start survives a reboot; whether
+running as `SYSTEM` does restore hostname sign-on; and a lookup from a second
+machine by a second person, which is the case that actually matters and the
+one that proves the attribution story (the log line should name that
+technician, not `anonymous`).
+
+Everything not listed as verified on the real machine was tested against a
+mocked API — all routes, the injection case, the log, and four concurrent
+requests.
 
 ## Exit behaviour
 
