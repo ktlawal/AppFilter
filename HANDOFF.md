@@ -14,16 +14,18 @@ installs (Intune group membership) is a possible later phase.
 
 - Windows, PowerShell 7 (NOT 5.1 — error handling differs, see gotchas)
 - Working dir: `D:\AbsoluteApplicationList`
-- Absolute API token ID + secret are pasted into the top of
-  `Get-RefreshAppList.ps1`, with environment variables as a fallback; see
-  Credentials.
+- Absolute API token ID + secret are pasted into the top of whichever front
+  end is being run — `Get-RefreshAppList.ps1` or `Start-RefreshAppServer.ps1`
+  — with environment variables as a fallback; see Credentials. The module
+  itself holds no credential: it takes one as a parameter.
 
 ## Credentials
 
-The token ID and secret are pasted into the top of `Get-RefreshAppList.ps1`.
-If those are left as the `TOKEN HERE` / `KEY HERE` placeholders, the script
-falls back to `ABSOLUTE_TOKEN_ID` and `ABSOLUTE_SECRET_KEY` from the
-environment — which is how a server or scheduled task would supply it without
+The token ID and secret are pasted into the top of each front end —
+`Get-RefreshAppList.ps1` and `Start-RefreshAppServer.ps1` — and handed to the
+module as parameters. If those are left as the `TOKEN HERE` / `KEY HERE`
+placeholders, the script falls back to `ABSOLUTE_TOKEN_ID` and
+`ABSOLUTE_SECRET_KEY` from the environment — which is how a server or scheduled task would supply it without
 the file carrying the key.
 
 The values in the file win when they are filled in. A recipient's leftover
@@ -31,7 +33,14 @@ environment variables should not quietly take over from the copy the
 distributor intended them to use. `-Verbose` reports which source answered.
 
 **This is a deliberate step back, taken so the tool can be handed to the team
-before a shared-credential story exists.** What it means in practice:
+before a shared-credential story exists.** Everything below applies to handing
+out `Get-RefreshAppList.ps1`. **The web front end is the way out of it:** with
+`Start-RefreshAppServer.ps1` on one lab machine, that machine holds the only
+copy of the key and technicians get a URL instead of a script. Nothing to
+distribute means nothing to rotate and nothing to leak. What follows is the
+cost of the console route.
+
+What it means in practice:
 
 - **The script file *is* the credential.** Do not screen-share it, attach it to
   a ticket, put it on a flash drive that leaves the building, or commit it.
@@ -47,7 +56,7 @@ the only remaining control that limits what a leaked copy can do: restrict the
 token to the corporate egress range and the key stops working anywhere else.
 Set it in the Absolute console, under the token's API Management page.
 
-### Three richer routes were built and removed### Three richer routes were built and removed
+### Three richer routes were built and removed
 
 All three worked. They came out as the scope narrowed to a single operator, and
 the commit history has each of them.
@@ -157,6 +166,17 @@ publisher string. Match on `appName`.
 
 ## PowerShell gotchas already hit (don't reintroduce)
 
+- **No ternary `? :` and no `??`.** They are PowerShell 7 syntax. The target
+  here is 7, but a lab machine may well be on stock 5.1, and a parse error
+  takes the whole file down before a single line runs. `Start-RefreshAppServer.ps1`
+  had two and they were removed. Use `if`/`else`.
+- **`ConvertTo-HtmlText` has to escape quotes, not just angle brackets.** It
+  originally did `& < >` only, which was harmless while every interpolation
+  was element text. The server puts a rejected serial into `value="..."`, and
+  a serial of `" autofocus onfocus="alert(1)` escaped the attribute and
+  injected a working event handler — confirmed against the running server
+  before the fix. `Test-AppFilter.ps1` now asserts all five characters.
+  Escape `&` first or the escapes get re-escaped.
 - **`[IO.Path]::GetFullPath($path, $base)` is .NET Core only.** The
   two-argument overload does not exist in Windows PowerShell 5.1, which runs
   on .NET Framework — it fails with "Cannot find an overload for GetFullPath
@@ -186,20 +206,37 @@ publisher string. Match on `appName`.
 
 ## Files
 
-- `Get-RefreshAppList.ps1` — main tool. `[-Serial <serial>]` `[-ShowFiltered]`
-  `[-NoPrompt]` `[-RulesCsv <path>]` `[-OutputCsv <path>]` `[-OutputHtml <path>]`
-  `[-NoSheet]`. With no serial and no device name it asks for a serial; an
-  empty answer exits without doing anything. `-BaselineCsv` still works as an
-  alias for `-RulesCsv`.
+- `AppFilter.psm1` — **the engine, and the only place the logic lives.** Both
+  front ends import it. Exports the normalizers, `Import-AppRule`,
+  `Get-AppClassification`, `Add-AppRule`, `Get-AbsoluteCredential`,
+  `Invoke-AbsoluteApi`, `Get-AbsoluteV3`, `Get-RefreshApps`,
+  `New-InstallSheetHtml`, `ConvertTo-HtmlText`, `Save-InstallSheet`,
+  `Read-IndexSelection`, `ConvertTo-Base64Url`. The API functions take
+  `-TokenId`/`-SecretKey` as parameters rather than reading a script-scope
+  variable, which is what let a second front end exist at all.
+  `Get-RefreshApps` is the one call that does everything: it returns an object
+  with `.Found`, `.Device`, `.Apps`, `.ToInstall`, `.Excluded`, `.ScanAge`,
+  `.Matched` and `.Message`. Put new behaviour here, not in a front end.
+- `Get-RefreshAppList.ps1` — console front end. `[-Serial <serial>]`
+  `[-ShowFiltered]` `[-NoPrompt]` `[-RulesCsv <path>]` `[-OutputCsv <path>]`
+  `[-OutputHtml <path>]` `[-NoSheet]`. With no serial and no device name it
+  asks for a serial; an empty answer exits without doing anything.
+  `-BaselineCsv` still works as an alias for `-RulesCsv`. It is now output and
+  prompting only — roughly 250 lines where it used to be 890.
+- `Start-RefreshAppServer.ps1` — web front end, for the always-on lab machine.
+  `[-Port <n>]` (5000) `[-BindAddress <addr>]` (`+`) `[-RulesCsv <path>]`
+  `[-Anonymous]` `[-LogPath <path>]`. See **Web front end** below.
 - `AppRules.csv` — **all** suppression rules, columns
   `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
   Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
   in the script.
-- `Test-AppFilter.ps1` — asserts both normalizers, loads the rules file, and
-  classifies two real device inventories against the bucket a human confirmed
-  for each. Lifts the functions out with the parser, so it never calls the API
-  and needs no credential. **Run it after touching a normalizer or the rules
-  file** — the classification cases are the regression net.
+- `Test-AppFilter.ps1` — asserts both normalizers and the HTML escaper, loads
+  the rules file, and classifies two real device inventories against the bucket
+  a human confirmed for each. It imports `AppFilter.psm1` and never calls the
+  API, so it needs no credential; it also parses both front ends so a syntax
+  error surfaces here rather than in front of a technician. **Run it after
+  touching a normalizer or the rules file** — the classification cases are the
+  regression net. 64 cases, all passing.
 - `Build-BaseImageList.ps1` — builds the baseline empirically by intersecting
   the inventories of known base-image devices, and prints an "on some devices"
   bucket for anything short of unanimous. This is now the source of
@@ -264,10 +301,13 @@ later touches `Import-AppRule` and nothing else.
 
 ## Current state
 
-The three agreed changes are applied and the baseline has been rebuilt from
-real base-image devices. The script parses clean and a run against a mocked API
-confirms the intended classification. It has **not** been re-run against a live
-serial since — the last real run predates all of this (serial `4QXTTHR3`:
+The logic now lives in `AppFilter.psm1` and there are two front ends over it:
+the console script and `Start-RefreshAppServer.ps1`. Both were exercised
+against a mocked API and agree exactly — 5 install candidates of 15 on the
+same fixture. `Test-AppFilter.ps1` passes all 64 cases.
+
+The baseline has been rebuilt from real base-image devices. It has **not**
+been re-run against a live serial since — the last real run predates all of this (serial `4QXTTHR3`:
 75 apps, 58 excluded, 17 install candidates), so expect that count to move,
 probably upward.
 
@@ -382,6 +422,72 @@ along with `Find-PdfBrowser`, `APPFILTER_BROWSER`, the throwaway profile
 directory and the subprocess wait. Plain HTML prints just as well, has no
 browser dependency, and leaves nothing running after the script ends.
 
+## Web front end
+
+`Start-RefreshAppServer.ps1` serves the same tick-list over HTTP from an
+always-on machine. It exists to answer the credential-distribution problem:
+the key sits on that one machine, technicians open a URL, and nobody else ever
+holds a copy of anything.
+
+```
+.\Start-RefreshAppServer.ps1                                  # port 5000, Windows auth, all interfaces
+.\Start-RefreshAppServer.ps1 -Port 8080
+.\Start-RefreshAppServer.ps1 -Anonymous -BindAddress localhost  # local trial only
+```
+
+Routes:
+
+| Route | Returns |
+|---|---|
+| `/` | the serial form |
+| `/lookup?serial=X` | the printable sheet, with a "look up another device" link |
+| `/health` | `OK`, for a monitor or a scheduled restart check |
+
+Behaviour worth knowing:
+
+- **Windows Integrated authentication is the default.** Only domain accounts
+  reach it, and `$context.User.Identity.Name` names the caller in the log, so
+  every lookup is attributable — which the console tool, sharing one token
+  across copies, can never be. `-Anonymous` turns it off and is for a local
+  trial only; combined with the default `-BindAddress +` it prints a warning,
+  because anyone who can reach the port could then read fleet inventory.
+- **Rules and credentials load before the port opens**, so a bad rules file or
+  a missing key fails at startup instead of on a technician's first lookup.
+- **One bad request cannot take the server down.** The body of the request loop
+  is wrapped; a failure returns a 500 page and the listener keeps serving.
+- **Serials are validated** against `^[A-Za-z0-9\-]{1,32}$` before any API call.
+  A rejected serial is echoed back into the form — which is exactly why the
+  escaping gotcha above matters.
+- **Every request is logged** to `RefreshAppServer.log` (override with
+  `-LogPath`): timestamp, caller, serial, outcome. Control characters in a
+  serial are replaced so a crafted `%0A` cannot forge a second log line.
+- **Requests are served one at a time.** `HttpListener` plus a single loop
+  means a second technician waits for the first lookup to finish — a few
+  seconds against the live API. Fine for a handful of people; it is the first
+  thing to change if it is not.
+- The curation prompt ("add any of these to the base image list?") is
+  **console-only**. Rules are still edited by running `Get-RefreshAppList.ps1`
+  or by hand. Adding it to the web page means letting a browser write to
+  `AppRules.csv`, which deserves its own thought.
+
+### Standing it up on the lab machine
+
+1. Copy `AppFilter.psm1`, `AppRules.csv` and `Start-RefreshAppServer.ps1` to
+   the machine and fill in the token at the top of the server script.
+2. Reserve the URL once, so it does not need an elevated session to run:
+   `netsh http add urlacl url=http://+:5000/ user=DOMAIN\ServiceAccount`
+3. Open the port to the domain profile:
+   `New-NetFirewallRule -DisplayName "Refresh App List" -Direction Inbound -Protocol TCP -LocalPort 5000 -Profile Domain -Action Allow`
+4. Make it survive a reboot — a scheduled task at startup running as the
+   service account, `pwsh -NoProfile -File ...\Start-RefreshAppServer.ps1`.
+5. Tell technicians `http://<machine>:5000/`.
+
+**Two things still unverified on the real machine**: whether an inbound
+firewall port can be opened on it at all, and whether the auto-start survives
+a reboot. Both are environment questions, not code ones. Everything else below
+was tested against a mocked API on this machine — all routes, the injection
+case, the log, and four concurrent requests.
+
 ## Exit behaviour
 
 The script ends with an explicit `exit`, so nothing lingers after a run:
@@ -389,6 +495,9 @@ The script ends with an explicit `exit`, so nothing lingers after a run:
 - `exit 0` — normal completion, and when the operator answers the serial
   prompt with nothing
 - `exit 1` — no application inventory came back for the device
+
+The server is the exception: it runs until Ctrl+C, and exits 1 if it cannot
+open the port (the failure message prints the `netsh http add urlacl` remedy).
 
 Note that `exit` inside a `.ps1` ends the *script*, not the console window it
 was launched from. Running `.\Get-RefreshAppList.ps1` from an open prompt
@@ -417,6 +526,12 @@ returns you to that prompt, which is correct. Launch it as
   (`Source=name-variant`). Inbox Store apps are the usual offenders — they tend
   to arrive under a bare product name. When a run surfaces something obviously
   in-box, that is what the curation prompt is for.
+- **The console table needs a real console.** `Format-Table` renders nothing
+  when stdout is redirected to a file or a pipe with no attached terminal — a
+  sandbox artifact, but it means `.\Get-RefreshAppList.ps1 X > out.txt`
+  captures the headers and counts without the application rows. Use
+  `-OutputCsv` or the printable sheet to capture a run. The web front end is
+  unaffected.
 - Store app display names can arrive localized, so a single baseline entry may
   not match across machines. Normalization does not help here — a localized
   name needs its own baseline row.

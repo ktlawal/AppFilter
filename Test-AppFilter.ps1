@@ -3,34 +3,34 @@
     Checks the normalizers and the classifier against known cases.
 
 .DESCRIPTION
-    Lifts the pure functions out of Get-RefreshAppList.ps1 with the parser, so
-    the script's own parameters and API calls are never invoked. Asserts the
+    Imports AppFilter.psm1 and exercises the pure functions in it. Nothing
+    here touches the network: the API functions are never called. Asserts the
     name and publisher shapes that turn up in Absolute's data, then classifies
     two real device inventories and checks each application lands in the bucket
     it landed in when a human looked at it.
 
 .EXAMPLE
-    .\Test-Normalization.ps1
+    .\Test-AppFilter.ps1
 #>
 
 [CmdletBinding()]
 param([string]$RulesCsv = "$PSScriptRoot\AppRules.csv")
 
-$script = Join-Path $PSScriptRoot 'Get-RefreshAppList.ps1'
-if (-not (Test-Path $script)) { throw "Cannot find Get-RefreshAppList.ps1 next to this test." }
+$module = Join-Path $PSScriptRoot 'AppFilter.psm1'
+if (-not (Test-Path $module)) { throw "Cannot find AppFilter.psm1 next to this test." }
+Import-Module $module -Force -ErrorAction Stop
 
-$errors = $null; $tokens = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$errors)
-if ($errors) {
-    $errors | ForEach-Object { Write-Host -ForegroundColor Red "PARSE $($_.Extent.StartLineNumber): $($_.Message)" }
-    throw "Get-RefreshAppList.ps1 does not parse."
-}
-foreach ($name in 'ConvertTo-NormalizedAppName', 'ConvertTo-NormalizedPublisher',
-                  'Import-AppRule', 'Get-AppClassification') {
-    $fn = $ast.FindAll({ param($n)
-        $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)[0]
-    if (-not $fn) { throw "Function $name not found in the script." }
-    Invoke-Expression $fn.Extent.Text
+# Both front ends are only worth testing if they parse. Catch a syntax error
+# here rather than when a technician runs one.
+foreach ($front in 'Get-RefreshAppList.ps1', 'Start-RefreshAppServer.ps1') {
+    $path = Join-Path $PSScriptRoot $front
+    if (-not (Test-Path $path)) { throw "Cannot find $front next to this test." }
+    $errors = $null; $tokens = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
+    if ($errors) {
+        $errors | ForEach-Object { Write-Host -ForegroundColor Red "PARSE $front $($_.Extent.StartLineNumber): $($_.Message)" }
+        throw "$front does not parse."
+    }
 }
 
 $failures = 0
@@ -154,6 +154,20 @@ Assert-Class 'Tanium Client 7.9.2.1'  'Tanium'                     'Base image'
 Assert-Class 'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.38.33130' 'Microsoft' 'Base image'
 Assert-Class 'Intel(R) Wireless Bluetooth(R)' 'Intel Corporation'  'Driver / OEM'
 Assert-Class 'Realtek High Definition Audio'  'Realtek Semiconductor Corp.' 'Driver / OEM'
+
+Write-Host "`nHTML escaping" -ForegroundColor Cyan
+# The server echoes a rejected serial back into value="...", so a bare quote
+# there would end the attribute and let a crafted link inject script into a
+# signed-in technician's page. Every one of these has to come back encoded.
+$htmlFn = { param($n) ConvertTo-HtmlText $n }
+Assert-Key '<script>'                      '&lt;script&gt;'     $htmlFn
+Assert-Key '" autofocus onfocus="alert(1)' '&quot; autofocus onfocus=&quot;alert(1)' $htmlFn
+Assert-Key "' onmouseover='x"              '&#39; onmouseover=&#39;x' $htmlFn
+Assert-Key 'Tom & Jerry'                   'Tom &amp; Jerry'    $htmlFn
+# Ampersand first, or the escapes get re-escaped into &amp;lt;.
+Assert-Key '&lt;'                          '&amp;lt;'           $htmlFn
+Assert-Key 'Realtek High Definition Audio' 'Realtek High Definition Audio' $htmlFn
+Assert-Key ''                              ''                   $htmlFn
 
 Write-Host ""
 if ($failures -eq 0) { Write-Host "All cases passed." -ForegroundColor Green }
