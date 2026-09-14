@@ -262,7 +262,8 @@ publisher string. Match on `appName`.
   prompting only — roughly 250 lines where it used to be 890.
 - `Start-RefreshAppServer.ps1` — web front end, for the always-on lab machine.
   `[-Port <n>]` (5000) `[-BindAddress <addr>]` (`+`) `[-RulesCsv <path>]`
-  `[-Anonymous]` `[-LogPath <path>]`. See **Web front end** below.
+  `[-Anonymous]` `[-AuthScheme <scheme>]` `[-LogPath <path>]`. See **Web front
+  end** below.
 - `AppRules.csv` — **all** suppression rules, columns
   `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
   Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
@@ -479,6 +480,7 @@ holds a copy of anything.
 ```
 .\Start-RefreshAppServer.ps1                                  # port 5000, Windows auth, all interfaces
 .\Start-RefreshAppServer.ps1 -Port 8080
+.\Start-RefreshAppServer.ps1 -Port 5055 -AuthScheme Ntlm      # when browsers loop on the credential prompt
 .\Start-RefreshAppServer.ps1 -Anonymous -BindAddress localhost  # local trial only
 ```
 
@@ -492,6 +494,19 @@ Routes:
 
 Behaviour worth knowing:
 
+- **A browser that prompts and then refuses correct credentials is a missing
+  SPN, not a browser fault.** Verified on the lab machine: `Invoke-WebRequest
+  -UseDefaultCredentials` returned 200 over both `localhost` and the machine's
+  own hostname, while a browser at the same hostname looped on the credential
+  prompt. PowerShell got in over NTLM; the browser was offered Negotiate, tried
+  Kerberos with the typed credentials, found no `HTTP/<host>` SPN registered
+  for the account running the listener, and re-prompted rather than falling
+  back. Three ways out, cheapest first: run with `-AuthScheme Ntlm`; add the
+  host to the Local intranet zone so browsers send default credentials
+  silently; or have a domain admin register the SPN
+  (`setspn -S HTTP/<host> DOMAIN\Account`). Running as `SYSTEM` under a
+  scheduled task sidesteps it entirely, because the machine account's SPN
+  already exists.
 - **Windows Integrated authentication is the default.** Only domain accounts
   reach it, and `$context.User.Identity.Name` names the caller in the log, so
   every lookup is attributable — which the console tool, sharing one token

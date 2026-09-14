@@ -25,6 +25,12 @@
 
     Local-only, no authentication. For trying it out on one machine.
 
+.EXAMPLE
+    .\Start-RefreshAppServer.ps1 -Port 5055 -AuthScheme Ntlm
+
+    NTLM only. Use this when a browser prompts for credentials and will not
+    accept correct ones - see -AuthScheme.
+
 .NOTES
     Binding to all interfaces needs either an elevated session or a one-time
     URL reservation, which is the better answer:
@@ -51,6 +57,21 @@ param(
 
     # Turn off Windows authentication. Only sensible for a local trial.
     [switch]$Anonymous,
+
+    # Which Windows authentication scheme to offer.
+    #
+    #   IntegratedWindowsAuthentication  Negotiate, falling back to NTLM
+    #   Negotiate                        Kerberos, falling back to NTLM
+    #   Ntlm                             NTLM only
+    #
+    # Use Ntlm when browsers prompt for credentials and then refuse to accept
+    # correct ones. That is what a missing HTTP/<host> SPN looks like from the
+    # outside: the browser attempts Kerberos with what you typed, gets no
+    # ticket, and re-prompts rather than falling back. PowerShell with
+    # -UseDefaultCredentials succeeds throughout, which makes it look like a
+    # browser fault rather than an SPN one.
+    [ValidateSet('IntegratedWindowsAuthentication', 'Negotiate', 'Ntlm')]
+    [string]$AuthScheme = 'IntegratedWindowsAuthentication',
 
     [string]$LogPath = "$PSScriptRoot\RefreshAppServer.log"
 )
@@ -189,9 +210,9 @@ $listener.Prefixes.Add("http://${BindAddress}:$Port/")
 if ($Anonymous) {
     $listener.AuthenticationSchemes = [System.Net.AuthenticationSchemes]::Anonymous
 } else {
-    # Negotiate covers Kerberos and falls back to NTLM, so a domain machine
-    # signs in silently and $context.User.Identity.Name names the caller.
-    $listener.AuthenticationSchemes = [System.Net.AuthenticationSchemes]::IntegratedWindowsAuthentication
+    # Whichever scheme is chosen, a domain machine signs in without a prompt
+    # and $context.User.Identity.Name names the caller in the log.
+    $listener.AuthenticationSchemes = [System.Net.AuthenticationSchemes]::$AuthScheme
 }
 
 try { $listener.Start() }
@@ -215,7 +236,7 @@ if ($BindAddress -eq '+') {
 }
 Write-Host "  Rules         $($rules.Names.Count) name, $($rules.Publishers.Count) publisher, $($rules.Patterns.Count) pattern"
 Write-Host "  Credential    $($credential.Source)"
-$authLabel = 'Windows Integrated'
+$authLabel = $AuthScheme
 if ($Anonymous) { $authLabel = 'ANONYMOUS - anyone who can reach the port' }
 Write-Host "  Auth          $authLabel"
 Write-Host "  Log           $LogPath"
