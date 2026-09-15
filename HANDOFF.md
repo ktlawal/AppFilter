@@ -556,15 +556,25 @@ Behaviour worth knowing:
   with no blocking call in it, also survives SIGINT here), so the reasoning is
   sound but the fix has only been confirmed not to break request serving.
   Check it on the real machine.
-- **"Conflicts with an existing registration" is not a missing reservation.**
-  It means something already holds the prefix — almost always an earlier
-  instance of this server still running, which is easy to accumulate while
-  Ctrl+C is unreliable. Adding a urlacl does nothing for it. Find the holder
-  with `Get-NetTCPConnection -LocalPort 5000 -State Listen` and
-  `netsh http show servicestate view=requestq`. The startup failure now tells
-  these apart: a conflict, an "Access is denied" (the prefix is reserved for a
-  *different* account — a reservation made for `NT AUTHORITY\SYSTEM` does not
-  let you listen as yourself), and everything else each get their own advice.
+- **"Conflicts with an existing registration" has two causes, and the likelier
+  one is a reservation held by another account.** Windows does *not* say
+  "Access is denied" for that, as you might expect — it says conflict. So a
+  `netsh http add urlacl ... user="NT AUTHORITY\SYSTEM"` reservation, made in
+  preparation for the startup task, blocks an interactive test run by a person
+  and reports it as though something were already listening. Observed on the
+  real machine, and it survived a reboot, which is what ruled out the other
+  cause. Check with
+  `netsh http show urlacl url=https://+:5000/appfilter/`.
+
+  A URL carries **one** reservation, so testing as yourself means deleting and
+  re-adding it, then putting it back for the startup task. Or skip the churn
+  and test through the task itself, running as SYSTEM, which is what the
+  reservation already matches.
+
+  The other cause is something genuinely listening, usually an earlier
+  instance — easy to accumulate while Ctrl+C is unreliable. A reboot rules
+  that one out. `Get-NetTCPConnection -LocalPort 5000 -State Listen` and
+  `netsh http show servicestate view=requestq` find it.
 - **Rules and credentials load before the port opens**, so a bad rules file or
   a missing key fails at startup instead of on a technician's first lookup.
 - **One bad request cannot take the server down.** The body of the request loop

@@ -258,18 +258,24 @@ catch {
     # situation on other platforms says "Address already in use".
     if ($reason -match 'conflicts with an existing registration|Address already in use') {
 
-        Write-Host "Something already holds this prefix. That is NOT a missing" -ForegroundColor Yellow
-        Write-Host "reservation - adding one will not help. Usually it is an earlier" -ForegroundColor Yellow
-        Write-Host "instance of this server still running." -ForegroundColor Yellow
+        Write-Host "Two different things produce this message." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Find what is holding port ${Port}:" -ForegroundColor Yellow
-        Write-Host "    Get-NetTCPConnection -LocalPort $Port -State Listen |"
-        Write-Host "        ForEach-Object { Get-Process -Id `$_.OwningProcess }"
+        Write-Host "1. The prefix is RESERVED FOR ANOTHER ACCOUNT." -ForegroundColor Yellow
+        Write-Host "   Windows reports that as a conflict, not as access denied."
+        Write-Host "   A reservation made for NT AUTHORITY\SYSTEM does not let you"
+        Write-Host "   listen as $env:USERNAME. Check who holds it:"
+        Write-Host "       netsh http show urlacl url=${scheme}://+:${Port}${BasePath}"
         Write-Host ""
-        Write-Host "and every registration on this machine:" -ForegroundColor Yellow
-        Write-Host "    netsh http show servicestate view=requestq"
+        Write-Host "   A URL has one reservation, so testing as yourself means"
+        Write-Host "   repointing it - then putting it back for the startup task:"
+        Write-Host "       netsh http delete urlacl url=${scheme}://+:${Port}${BasePath}"
+        Write-Host "       netsh http add urlacl url=${scheme}://+:${Port}${BasePath} user=`"$env:USERDOMAIN\$env:USERNAME`""
         Write-Host ""
-        Write-Host "Stop the process holding it, then start this again." -ForegroundColor Yellow
+        Write-Host "2. Something is already listening - usually an earlier instance." -ForegroundColor Yellow
+        Write-Host "   A reboot rules this one out. Otherwise:"
+        Write-Host "       Get-NetTCPConnection -LocalPort $Port -State Listen |"
+        Write-Host "           ForEach-Object { Get-Process -Id `$_.OwningProcess }"
+        Write-Host "       netsh http show servicestate view=requestq" 
 
     } elseif ($reason -match 'Access is denied') {
 
