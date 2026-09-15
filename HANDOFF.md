@@ -268,6 +268,16 @@ publisher string. Match on `appName`.
   `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
   Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
   in the script.
+- `Test-ServiceAccount.ps1` — run this **through the scheduled task, as
+  SYSTEM**, before pointing that task at the server. A task that exits 1 says
+  nothing about why; this writes a report of what that account can actually
+  do: identity, PowerShell version, execution policy, **language mode**, write
+  access to the folder, module import, rule load, credential resolution,
+  whether `HttpListener` and `HMACSHA256` can be constructed at all, and the
+  http.sys reservation, certificate binding and port state. Every step is
+  wrapped separately so one failure does not hide the rest, and it falls back
+  to `%windir%\Temp` if it cannot write beside itself. It never prints the
+  secret, only its length.
 - `Find-ServerCertificate.ps1` — read-only. Lists the local machine
   certificates that could serve https for this machine, with a verdict and a
   reason for each rejection, and prints the binding command. See the https
