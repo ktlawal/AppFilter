@@ -556,6 +556,15 @@ Behaviour worth knowing:
   with no blocking call in it, also survives SIGINT here), so the reasoning is
   sound but the fix has only been confirmed not to break request serving.
   Check it on the real machine.
+- **"Conflicts with an existing registration" is not a missing reservation.**
+  It means something already holds the prefix — almost always an earlier
+  instance of this server still running, which is easy to accumulate while
+  Ctrl+C is unreliable. Adding a urlacl does nothing for it. Find the holder
+  with `Get-NetTCPConnection -LocalPort 5000 -State Listen` and
+  `netsh http show servicestate view=requestq`. The startup failure now tells
+  these apart: a conflict, an "Access is denied" (the prefix is reserved for a
+  *different* account — a reservation made for `NT AUTHORITY\SYSTEM` does not
+  let you listen as yourself), and everything else each get their own advice.
 - **Rules and credentials load before the port opens**, so a bad rules file or
   a missing key fails at startup instead of on a technician's first lookup.
 - **One bad request cannot take the server down.** The body of the request loop

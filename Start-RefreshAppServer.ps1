@@ -246,14 +246,49 @@ if ($Anonymous) {
 
 try { $listener.Start() }
 catch {
+    $reason = $_.Exception.Message
+
     Write-Host ""
     Write-Host "Could not listen on ${scheme}://${BindAddress}:${Port}${BasePath}" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host $reason -ForegroundColor Red
     Write-Host ""
-    Write-Host "Binding to all interfaces needs a URL reservation, once:" -ForegroundColor Yellow
-    Write-Host "    netsh http add urlacl url=${scheme}://+:${Port}${BasePath} user=$env:USERDOMAIN\$env:USERNAME"
-    Write-Host ""
-    Write-Host "The reservation has to match the scheme and path exactly." -ForegroundColor Yellow
+
+    # These two failures read alike and need opposite fixes, so say which.
+    # http.sys says "conflicts with an existing registration"; the same
+    # situation on other platforms says "Address already in use".
+    if ($reason -match 'conflicts with an existing registration|Address already in use') {
+
+        Write-Host "Something already holds this prefix. That is NOT a missing" -ForegroundColor Yellow
+        Write-Host "reservation - adding one will not help. Usually it is an earlier" -ForegroundColor Yellow
+        Write-Host "instance of this server still running." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Find what is holding port ${Port}:" -ForegroundColor Yellow
+        Write-Host "    Get-NetTCPConnection -LocalPort $Port -State Listen |"
+        Write-Host "        ForEach-Object { Get-Process -Id `$_.OwningProcess }"
+        Write-Host ""
+        Write-Host "and every registration on this machine:" -ForegroundColor Yellow
+        Write-Host "    netsh http show servicestate view=requestq"
+        Write-Host ""
+        Write-Host "Stop the process holding it, then start this again." -ForegroundColor Yellow
+
+    } elseif ($reason -match 'Access is denied') {
+
+        Write-Host "The account running this is not allowed to listen on that prefix." -ForegroundColor Yellow
+        Write-Host "Reserve it for this account, once, elevated:" -ForegroundColor Yellow
+        Write-Host "    netsh http add urlacl url=${scheme}://+:${Port}${BasePath} user=`"$env:USERDOMAIN\$env:USERNAME`""
+        Write-Host ""
+        Write-Host "A reservation made for a different account - NT AUTHORITY\SYSTEM," -ForegroundColor Yellow
+        Write-Host "say - does not let you listen. Check who holds it:" -ForegroundColor Yellow
+        Write-Host "    netsh http show urlacl url=${scheme}://+:${Port}${BasePath}"
+
+    } else {
+
+        Write-Host "Binding to all interfaces needs a URL reservation, once:" -ForegroundColor Yellow
+        Write-Host "    netsh http add urlacl url=${scheme}://+:${Port}${BasePath} user=`"$env:USERDOMAIN\$env:USERNAME`""
+        Write-Host ""
+        Write-Host "The reservation has to match the scheme and path exactly." -ForegroundColor Yellow
+    }
+
     Write-Host ""
     Write-Host "Or run with -BindAddress localhost to keep it to this machine." -ForegroundColor Yellow
     exit 1
