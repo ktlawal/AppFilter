@@ -128,18 +128,24 @@ $PageCss = @'
          color: #101828; background: #fff; }
 
   /* Left: what this is. Vertically centred - with the step list gone there is
-     not enough here to justify pinning content to the top and bottom edges. */
-  .left { background: #0f172a; color: #fff; padding: 46px 40px;
-          display: flex; flex-direction: column; justify-content: center; }
+     not enough here to justify pinning content to the top and bottom edges -
+     and pushed to the inner edge, so on a wide monitor the two halves read as
+     one composition across the divider instead of drifting to opposite walls.
+     The text inside stays left-aligned; only the block moves. */
+  .left { background: #0f172a; color: #fff; padding: 46px 56px 46px 40px;
+          display: flex; flex-direction: column; justify-content: center;
+          align-items: flex-end; }
+  .left .inner { max-width: 34ch; }
   .mark { font-size: 12px; font-weight: 600; letter-spacing: .14em;
           text-transform: uppercase; color: #7dd3fc; }
   .left h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em;
              line-height: 1.25; margin: 16px 0 0; }
-  .left p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 14px 0 0;
-            max-width: 34ch; }
+  .left p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 14px 0 0; }
 
   /* Right: the one thing to do. */
-  .right { display: grid; place-items: center; padding: 40px; min-width: 0; }
+  /* place-items: center start - vertically centred, held against the divider. */
+  .right { display: grid; place-items: center start;
+           padding: 40px 40px 40px 56px; min-width: 0; }
   .form { width: min(380px, 100%); min-width: 0; }
   h1 { font-size: 23px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 26px; }
   label { display: block; font-size: 11px; font-weight: 600; letter-spacing: .09em;
@@ -171,10 +177,11 @@ $PageCss = @'
      page still says what it is, but stops eating half the screen. */
   @media (max-width: 720px) {
     body { grid-template-columns: minmax(0,1fr); grid-template-rows: auto 1fr; }
-    .left { padding: 28px 24px; }
+    /* Stacked, there is no divider to hug: both go back to the left margin. */
+    .left { padding: 28px 24px; align-items: stretch; }
     .left h2 { font-size: 21px; }
     .left p { display: none; }
-    .right { padding: 32px 24px; }
+    .right { padding: 32px 24px; justify-items: stretch; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 '@
@@ -197,9 +204,11 @@ function New-SplitPage {
 </head>
 <body>
   <div class="left">
-    <div class="mark">PC Refresh</div>
-    <h2>What to install<br />on the new device</h2>
-    <p>Pulls the old device's inventory and subtracts everything the image already provides.</p>
+    <div class="inner">
+      <div class="mark">PC Refresh</div>
+      <h2>What to install<br />on the new device</h2>
+      <p>Pulls the old device's inventory and subtracts everything the image already provides.</p>
+    </div>
   </div>
   <div class="right">
     <div class="form">
