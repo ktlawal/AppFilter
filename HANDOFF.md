@@ -650,6 +650,17 @@ chain-building path is verified against a real certificate; the
 store-enumeration path is not, since the sandbox has no
 `Cert:\LocalMachine\My`.
 
+**Confirmed on the real machine:** the auto-enrolled machine certificate
+chains cleanly to the enterprise CA through an intermediate, with online
+revocation checking passing too. The first report calling it untrusted was the
+`Test-Certificate` bug above, not a real finding — worth remembering before
+anyone goes asking PKI for a certificate they already have.
+
+The leaf certificate there carries its name **only in the SAN, with an empty
+Subject**, which is normal for an enterprise template. `GetNameInfo('SimpleName')`
+returns nothing for such a certificate, so the chain display falls through to
+the SAN and then the raw subject.
+
 ### Where this got to
 
 Steps 1-4 are done on the real machine. Confirmed working there: the inbound

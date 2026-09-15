@@ -178,7 +178,18 @@ else {
         Write-Host "  Chain       " -NoNewline
         # GetNameInfo pulls the common name out regardless of RDN order;
         # splitting the subject on a comma picks whatever happens to be first.
-        $links = @($noRevoke.ChainElements | ForEach-Object { $_.Certificate.GetNameInfo('SimpleName', $false) })
+        # A certificate issued with an empty Subject - its name carried only
+        # in the SAN, which enterprise templates do - returns nothing from
+        # SimpleName, so fall through to the SAN and then the raw subject
+        # rather than printing a blank link in the chain.
+        $links = @($noRevoke.ChainElements | ForEach-Object {
+            $e = $_.Certificate
+            $name = $e.GetNameInfo('SimpleName', $false)
+            if (-not $name) { $name = $e.GetNameInfo('DnsName', $false) }
+            if (-not $name) { $name = $e.Subject }
+            if (-not $name) { $name = "(unnamed, $($e.Thumbprint))" }
+            $name
+        })
         Write-Host ($links -join '  <-  ')
 
         $noRevoke.Dispose()
