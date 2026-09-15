@@ -628,8 +628,27 @@ to carry a name that suits all of them.
 certificates qualify (private key present, in date, valid for Server
 Authentication, name matching this machine), says whether each chains to a
 trusted CA, and prints the exact `netsh http add sslcert` line. It changes
-nothing. **Untested against a real certificate store** — the sandbox has no
-`Cert:\LocalMachine\My`, so only its parsing is verified.
+nothing.
+
+**The http.sys binding pins a thumbprint, so a renewed certificate silently
+breaks https.** A renewal is a different certificate with a different
+thumbprint; the binding still points at the old one and connections start
+failing with nothing on this machine having changed. Auto-enrolled machine
+certificates renew on their own, which makes this a *scheduled* outage rather
+than a possible one. Re-run the binding after any renewal — the certificate in
+use at the time of writing expires **Dec 2026**, and the finder warns when
+fewer than 120 days remain.
+
+**Trust is reported from the chain, not from `Test-Certificate`.** The first
+version used `Test-Certificate -SSLServerAuthentication` and collapsed every
+failure into "does NOT chain cleanly", which was actively misleading: an
+unreachable CRL fails identically to an untrusted root, and browsers soft-fail
+revocation so would not have cared. It now builds the chain twice, once with
+revocation checking off and once on, prints the real `ChainStatus` reason, and
+separates "cannot verify revocation" from "does not trust the issuer". The
+chain-building path is verified against a real certificate; the
+store-enumeration path is not, since the sandbox has no
+`Cert:\LocalMachine\My`.
 
 ### Where this got to
 

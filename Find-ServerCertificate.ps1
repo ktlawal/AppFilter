@@ -141,20 +141,56 @@ else {
         Write-Host "  Expires     $($u.NotAfter)"
 
         # Chain trust is the difference between a quiet browser and a warning
-        # page, and it is the one thing that cannot be read off the
-        # certificate itself.
-        $trusted = $null
-        try {
-            $trusted = Test-Certificate -Cert (Get-Item "Cert:\LocalMachine\My\$($u.Thumbprint)") `
-                                        -SSLServerAuthentication -ErrorAction Stop
-        } catch { $trusted = $false }
+        # page, and it cannot be read off the certificate itself. Build the
+        # chain twice: once ignoring revocation, once checking it. A bare
+        # pass/fail is useless here, because an unreachable CRL fails exactly
+        # like an untrusted root while meaning something completely different
+        # - browsers soft-fail revocation and would not care.
+        $certObj = Get-Item "Cert:\LocalMachine\My\$($u.Thumbprint)"
+
+        $noRevoke = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        $noRevoke.ChainPolicy.RevocationMode = 'NoCheck'
+        $pathOk = $noRevoke.Build($certObj)
+
+        $withRevoke = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        $withRevoke.ChainPolicy.RevocationMode = 'Online'
+        $fullOk = $withRevoke.Build($certObj)
 
         if ($u.SelfSigned) {
             Write-Host "  Trust       SELF-SIGNED - browsers will still warn. Not a fix." -ForegroundColor Yellow
-        } elseif ($trusted) {
+        } elseif ($pathOk) {
             Write-Host "  Trust       chains to a trusted CA on this machine" -ForegroundColor Green
+            if (-not $fullOk) {
+                Write-Host "              (revocation could not be checked - usually a CRL this" -ForegroundColor DarkGray
+                Write-Host "               machine cannot reach. Browsers soft-fail this.)" -ForegroundColor DarkGray
+            }
         } else {
-            Write-Host "  Trust       does NOT chain cleanly here - browsers will warn" -ForegroundColor Yellow
+            Write-Host "  Trust       chain does NOT build on this machine" -ForegroundColor Yellow
+            foreach ($s in $noRevoke.ChainStatus) {
+                Write-Host ("              {0}: {1}" -f $s.Status, $s.StatusInformation.Trim()) -ForegroundColor Yellow
+            }
+            Write-Host "              A missing intermediate or root here does not always mean" -ForegroundColor DarkGray
+            Write-Host "              your technicians' machines will reject it - test from one." -ForegroundColor DarkGray
+        }
+
+        # Chain built from this machine's stores, so the reader can see which
+        # CA is actually being trusted.
+        Write-Host "  Chain       " -NoNewline
+        # GetNameInfo pulls the common name out regardless of RDN order;
+        # splitting the subject on a comma picks whatever happens to be first.
+        $links = @($noRevoke.ChainElements | ForEach-Object { $_.Certificate.GetNameInfo('SimpleName', $false) })
+        Write-Host ($links -join '  <-  ')
+
+        $noRevoke.Dispose()
+        $withRevoke.Dispose()
+
+        # The binding is by thumbprint. A renewed certificate is a DIFFERENT
+        # certificate with a different thumbprint, so https stops working the
+        # day this one is replaced, silently, with no change on this machine.
+        $daysLeft = [int]($u.NotAfter - (Get-Date)).TotalDays
+        if ($daysLeft -lt 120) {
+            Write-Host "  Renewal     $daysLeft days left. The binding below pins this thumbprint," -ForegroundColor Yellow
+            Write-Host "              so https breaks when this certificate is renewed. Diarise it." -ForegroundColor Yellow
         }
 
         Write-Host ""
