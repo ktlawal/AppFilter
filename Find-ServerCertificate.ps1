@@ -137,6 +137,24 @@ else {
     foreach ($u in $usable) {
         Write-Host "  Thumbprint  $($u.Thumbprint)"
         Write-Host "  Names       $($u.Names)"
+
+        # A certificate naming only the FQDN is rejected for the short name
+        # with ERR_CERT_COMMON_NAME_INVALID - TLS working perfectly, the
+        # browser objecting to the name alone. Say which names are safe to
+        # hand out rather than leaving it to be discovered in a browser.
+        $covered   = @()
+        $uncovered = @()
+        foreach ($h in $hostNames) {
+            if (@($u.Names -split ',\s*') -contains $h) { $covered += $h } else { $uncovered += $h }
+        }
+        if ($uncovered.Count -gt 0 -and $covered.Count -gt 0) {
+            Write-Host "  Use in URL  $($covered[0])" -ForegroundColor Green
+            Write-Host "  NOT         $($uncovered -join ', ')" -ForegroundColor Yellow
+            Write-Host "              not on this certificate. Browsing those gives" -ForegroundColor Yellow
+            Write-Host "              ERR_CERT_COMMON_NAME_INVALID even though TLS is fine." -ForegroundColor Yellow
+        } elseif ($covered.Count -gt 0) {
+            Write-Host "  Use in URL  $($covered -join ', ')" -ForegroundColor Green
+        }
         Write-Host "  Issuer      $($u.Issuer)"
         Write-Host "  Expires     $($u.NotAfter)"
 
@@ -226,6 +244,10 @@ Write-Host "      Get-Certificate -Template Machine -CertStoreLocation Cert:\Loc
 Write-Host ""
 Write-Host "    'Machine' is the usual template name; yours may differ."
 Write-Host "    certutil -pulse forces an autoenrolment check first."
+Write-Host ""
+Write-Host "  Browse the name the certificate carries - an IP address, or a" -ForegroundColor Yellow
+Write-Host "  short hostname where the certificate names only the FQDN, fails" -ForegroundColor Yellow
+Write-Host "  with ERR_CERT_COMMON_NAME_INVALID however well TLS is set up." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "  Then start the server with -UseHttps, and remember the URL"
 Write-Host "  reservation is scheme-specific:" -ForegroundColor Yellow

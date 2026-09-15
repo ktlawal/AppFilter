@@ -617,9 +617,19 @@ Behaviour worth knowing:
    `New-NetFirewallRule -DisplayName "Refresh App List" -Direction Inbound -Protocol TCP -LocalPort 5000 -Profile Domain -Action Allow`
 4. Make it survive a reboot — a scheduled task at startup running as the
    service account, `pwsh -NoProfile -File ...\Start-RefreshAppServer.ps1`.
-5. Tell technicians `http://<machine>:5000/appfilter/`. Both the short name
-   and the FQDN work once it runs as SYSTEM, because a machine account
-   registers `HOST/shortname` and `HOST/fqdn` and `HOST/` covers HTTP.
+5. Tell technicians `https://<machine-fqdn>:5000/appfilter/`. **The FQDN, not
+   the short name** — see below.
+
+**Kerberos and TLS disagree about which names are acceptable, and both have to
+be satisfied.** A machine account registers `HOST/shortname` *and* `HOST/fqdn`,
+so Windows authentication is happy with either. The certificate is not: the
+auto-enrolled one here names **only the FQDN**, so the short name gives
+`NET::ERR_CERT_COMMON_NAME_INVALID` with TLS otherwise working perfectly — the
+handshake completes, the chain verifies, and the browser objects to the name
+alone. An IP address fails the same way, which retires the IP workaround used
+earlier for the SPN problem. Hand out the FQDN. `Find-ServerCertificate.ps1`
+now prints which of the machine's names the certificate covers and which it
+does not.
 
 ### It will say "Not secure", and the startup task does not change that
 
