@@ -621,6 +621,33 @@ Behaviour worth knowing:
   or by hand. Adding it to the web page means letting a browser write to
   `AppRules.csv`, which deserves its own thought.
 
+### Running it under the startup task
+
+**The task is what makes it survive a reboot.** Windows has no other
+no-dependency way to start a console program at boot without a logged-in user:
+the Startup folder and the Run key both need a session, and a real service
+would need a wrapper like WinSW or NSSM around a PowerShell script. A
+scheduled task with an At-Startup trigger running as `NT AUTHORITY\SYSTEM` is
+the whole mechanism.
+
+Four settings on that task are not optional:
+
+- **Run as `NT AUTHORITY\SYSTEM`**, which is also what fixes Kerberos — the
+  machine account already owns `HOST/<host>`.
+- **Trigger: At startup.** Not at logon; the lab machine may sit at a locked
+  screen for weeks.
+- **Execution time limit: disabled.** The default stops a task after three
+  days, which would silently kill the server mid-week.
+- **Restart on failure**, a minute apart, a few times. The script exits 1 on a
+  startup failure, and without this the task simply stays dead.
+
+**There is no console under the task**, so `Write-Host` goes to a discarded
+stdout. `Write-ServerLog` therefore records `STARTED` (with the URL, auth
+scheme, credential source, rule count and PID), `FAILED TO START` with the
+reason, and `STOPPED` into `RefreshAppServer.log` beside the request lines.
+Without those, a server that died at startup looks exactly like one that is
+running and idle. Task Scheduler's "Last Run Result" is the other signal.
+
 ### Standing it up on the lab machine
 
 1. Copy `AppFilter.psm1`, `AppRules.csv` and `Start-RefreshAppServer.ps1` to

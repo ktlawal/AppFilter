@@ -259,6 +259,22 @@ function New-ErrorPage {
 }
 
 
+function Write-ServerLog {
+    <#
+        Lifecycle events - started, failed to start, stopped - into the same
+        file as the requests.
+
+        Under the startup task there is no console: Write-Host goes to a
+        discarded stdout, so a server that dies on startup would be
+        indistinguishable from one that is running. The log is the only
+        witness, so it has to carry more than request lines.
+    #>
+    param([string]$Message)
+    $line = '{0}  {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+    try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 -ErrorAction Stop }
+    catch { Write-Warning "Could not write to $LogPath - $($_.Exception.Message)" }
+}
+
 function Write-RequestLog {
     param([string]$User, [string]$Serial, [string]$Outcome)
     # No ternary here on purpose: this has to run on Windows PowerShell 5.1.
@@ -367,6 +383,8 @@ catch {
 
     Write-Host ""
     Write-Host "Or run with -BindAddress localhost to keep it to this machine." -ForegroundColor Yellow
+
+    Write-ServerLog "FAILED TO START  ${scheme}://${BindAddress}:${Port}${BasePath} - $reason"
     exit 1
 }
 
@@ -398,6 +416,12 @@ Write-Host ""
 if ($Anonymous -and $BindAddress -eq '+') {
     Write-Warning "Anonymous access on every interface: anyone who can reach this port can read fleet inventory."
 }
+
+Write-ServerLog ("STARTED  {0}://{1}:{2}{3}  auth={4}  credential={5}  rules={6}  pid={7}" -f
+                 $scheme, $BindAddress, $Port, $BasePath, $authLabel,
+                 $credential.Source,
+                 ($rules.Names.Count + $rules.Publishers.Count + $rules.Patterns.Count),
+                 $PID)
 
 try {
     while ($listener.IsListening) {
@@ -507,6 +531,7 @@ try {
 finally {
     $listener.Stop()
     $listener.Close()
+    Write-ServerLog "STOPPED"
     Write-Host ""
     Write-Host "Server stopped." -ForegroundColor Yellow
 }
