@@ -86,6 +86,12 @@ param(
     [ValidateSet('IntegratedWindowsAuthentication', 'Negotiate', 'Ntlm')]
     [string]$AuthScheme = 'IntegratedWindowsAuthentication',
 
+    # Serve https instead of http. The certificate is not configured here:
+    # it is bound to the port in http.sys, once, outside this script. Run
+    # Find-ServerCertificate.ps1 to locate one and get the exact command.
+    # Without that binding the listener starts and every connection is reset.
+    [switch]$UseHttps,
+
     [string]$LogPath = "$PSScriptRoot\RefreshAppServer.log"
 )
 
@@ -224,8 +230,11 @@ if ($BasePath -eq '//') { $BasePath = '/' }
 # What routes are matched against, with no trailing slash: '/appfilter'.
 $basePrefix = $BasePath.TrimEnd('/')
 
+$scheme = 'http'
+if ($UseHttps) { $scheme = 'https' }
+
 $listener = [System.Net.HttpListener]::new()
-$listener.Prefixes.Add("http://${BindAddress}:${Port}${BasePath}")
+$listener.Prefixes.Add("${scheme}://${BindAddress}:${Port}${BasePath}")
 
 if ($Anonymous) {
     $listener.AuthenticationSchemes = [System.Net.AuthenticationSchemes]::Anonymous
@@ -238,13 +247,13 @@ if ($Anonymous) {
 try { $listener.Start() }
 catch {
     Write-Host ""
-    Write-Host "Could not listen on http://${BindAddress}:${Port}${BasePath}" -ForegroundColor Red
+    Write-Host "Could not listen on ${scheme}://${BindAddress}:${Port}${BasePath}" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     Write-Host ""
     Write-Host "Binding to all interfaces needs a URL reservation, once:" -ForegroundColor Yellow
-    Write-Host "    netsh http add urlacl url=http://+:${Port}${BasePath} user=$env:USERDOMAIN\$env:USERNAME"
+    Write-Host "    netsh http add urlacl url=${scheme}://+:${Port}${BasePath} user=$env:USERDOMAIN\$env:USERNAME"
     Write-Host ""
-    Write-Host "The reservation has to match the path exactly, base path included." -ForegroundColor Yellow
+    Write-Host "The reservation has to match the scheme and path exactly." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Or run with -BindAddress localhost to keep it to this machine." -ForegroundColor Yellow
     exit 1
@@ -252,9 +261,19 @@ catch {
 
 Write-Host ""
 Write-Host "Refresh App List server" -ForegroundColor Green
-Write-Host "  Listening on  http://${BindAddress}:${Port}${BasePath}"
+Write-Host "  Listening on  ${scheme}://${BindAddress}:${Port}${BasePath}"
 if ($BindAddress -eq '+') {
-    Write-Host "  Technicians   http://$($env:COMPUTERNAME):${Port}${BasePath}" -ForegroundColor Cyan
+    Write-Host "  Technicians   ${scheme}://$($env:COMPUTERNAME):${Port}${BasePath}" -ForegroundColor Cyan
+}
+
+if ($UseHttps) {
+    # http.sys owns the TLS handshake, so a missing or wrong certificate
+    # binding does not fail here - it fails per connection, later, looking
+    # like the site is simply refusing to load.
+    Write-Host "  Certificate   bound in http.sys, not by this script" -ForegroundColor DarkGray
+    Write-Host "                check: netsh http show sslcert ipport=0.0.0.0:$Port" -ForegroundColor DarkGray
+} else {
+    Write-Host "  Certificate   none - browsers will say Not secure" -ForegroundColor DarkGray
 }
 Write-Host "  Rules         $($rules.Names.Count) name, $($rules.Publishers.Count) publisher, $($rules.Patterns.Count) pattern"
 Write-Host "  Credential    $($credential.Source)"

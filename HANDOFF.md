@@ -268,6 +268,10 @@ publisher string. Match on `appName`.
   `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
   Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
   in the script.
+- `Find-ServerCertificate.ps1` — read-only. Lists the local machine
+  certificates that could serve https for this machine, with a verdict and a
+  reason for each rejection, and prints the binding command. See the https
+  section under **Web front end**.
 - `Debug-AbsoluteLookup.ps1` — run this when a lookup says "no device matched"
   for a device you know exists. It prints the PowerShell version, which
   credential source answered, and the raw response shape for both an
@@ -603,9 +607,29 @@ Services) to the machine's own name. Then bind it to the port and serve
     netsh http add sslcert ipport=0.0.0.0:5000 certhash=<thumbprint> appid={<any guid>}
 
 and the listener prefix becomes `https://+:5000/appfilter/`. A self-signed
-certificate does **not** help — browsers warn about it just as loudly. Not
-built; the script has no `-UseHttps` switch yet. The code change is small; the
-certificate is the real work and it is not a coding task.
+certificate does **not** help — browsers warn about it just as loudly.
+
+`Start-RefreshAppServer.ps1 -UseHttps` switches the scheme. It does **not**
+configure the certificate: http.sys owns the TLS handshake, and the binding is
+made once, outside the script. Two consequences worth knowing:
+
+- **A missing or wrong binding does not fail at startup.** The listener starts
+  happily and every connection is reset instead, which reads as "the site
+  won't load" rather than "the certificate is wrong". Check with
+  `netsh http show sslcert ipport=0.0.0.0:5000`.
+- **The URL reservation is scheme-specific.** An `http://+:5000/appfilter/`
+  reservation does nothing for https; add `https://+:5000/appfilter/` too.
+
+The certificate binds **per ip:port, not per path**, so every application
+sharing port 5000 shares one certificate — convenient, but the certificate has
+to carry a name that suits all of them.
+
+`Find-ServerCertificate.ps1` reads the local machine store and reports which
+certificates qualify (private key present, in date, valid for Server
+Authentication, name matching this machine), says whether each chains to a
+trusted CA, and prints the exact `netsh http add sslcert` line. It changes
+nothing. **Untested against a real certificate store** — the sandbox has no
+`Cert:\LocalMachine\My`, so only its parsing is verified.
 
 ### Where this got to
 
