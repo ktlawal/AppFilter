@@ -567,6 +567,16 @@ Behaviour worth knowing:
   still sitting there. **Moving to https means deleting the http reservation,
   not adding a second one.** Technicians' http bookmarks stop working at that
   moment, which is the intent.
+- **`min-width: 0` on a text input, and `width: min(Npx, 100%)` on its
+  wrapper.** A text input carries an intrinsic minimum width from its default
+  `size`, which `width: 100%` does not override inside a grid or flex parent.
+- **Headless Chrome will not render below a 500px viewport.** `--window-size`
+  smaller than that is silently clamped, so a screenshot taken at 420 is a
+  crop of a 500-wide render and shows content running off the right edge that
+  is not actually overflowing. This looked exactly like a responsive bug and
+  was not one. Measure `document.body.scrollWidth` against
+  `documentElement.clientWidth`, or set an explicit container width and read
+  the rectangles back, rather than trusting a narrow screenshot.
 - **"Conflicts with an existing registration" also covers a reservation held
   by another account.** Windows does *not* say
   "Access is denied" for that, as you might expect — it says conflict. So a
@@ -586,6 +596,12 @@ Behaviour worth knowing:
   instance — easy to accumulate while Ctrl+C is unreliable. A reboot rules
   that one out. `Get-NetTCPConnection -LocalPort 5000 -State Listen` and
   `netsh http show servicestate view=requestq` find it.
+- **The form and error pages share one shell**, `New-SplitPage`: a fixed dark
+  panel on the left saying what the tool is, and a working column on the right
+  that holds either the serial form or an error. Adding a page means writing
+  its right-hand column only. The design was chosen from four mockups; the
+  printable sheet was deliberately left alone, since it is print-first and
+  gains nothing from screen styling.
 - **Rules and credentials load before the port opens**, so a bad rules file or
   a missing key fails at startup instead of on a technician's first lookup.
 - **One bad request cannot take the server down.** The body of the request loop

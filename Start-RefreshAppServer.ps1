@@ -122,39 +122,69 @@ Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Sto
 # ------------------------------------------------------------------
 $PageCss = @'
   * { box-sizing: border-box; }
-  body { font-family: Segoe UI, Calibri, Arial, sans-serif; font-size: 10.5pt;
-         color: #000; background: #f4f4f5; margin: 0; padding: 8mm; }
-  .card { max-width: 150mm; margin: 12mm auto; background: #fff; padding: 10mm;
-          box-shadow: 0 1px 4px rgba(0,0,0,.18); }
-  h1 { font-size: 15pt; margin: 0 0 1mm; }
-  p.sub { margin: 0 0 6mm; color: #555; font-size: 9.5pt; }
-  label { display: block; font-size: 7.5pt; letter-spacing: .06em;
-          text-transform: uppercase; color: #555; margin-bottom: 1.5mm; }
-  input[type=text] { font: inherit; font-size: 13pt; letter-spacing: .04em;
-                     width: 100%; padding: 3mm; border: 1px solid #999;
-                     border-radius: 3px; }
-  input[type=text]:focus { outline: 2px solid #000; outline-offset: 1px; }
-  button { font: inherit; font-weight: 600; padding: 3mm 8mm; margin-top: 4mm;
-           border: 1px solid #000; background: #000; color: #fff;
-           border-radius: 3px; cursor: pointer; }
-  button:hover { background: #333; border-color: #333; }
-  .err { border: 0.75pt solid #b3261e; border-left-width: 3pt; padding: 3mm;
-         margin: 0 0 5mm; font-size: 9.5pt; color: #b3261e; background: #fdf3f2; }
-  .foot { margin-top: 6mm; padding-top: 2mm; border-top: 0.5pt solid #ccc;
-          font-size: 8.5pt; color: #666; }
+  html, body { height: 100%; }
+  body { margin: 0; display: grid; grid-template-columns: minmax(0,42%) minmax(0,1fr);
+         font-family: "Segoe UI", -apple-system, system-ui, Calibri, Arial, sans-serif;
+         color: #101828; background: #fff; }
+
+  /* Left: what this is. Vertically centred - with the step list gone there is
+     not enough here to justify pinning content to the top and bottom edges. */
+  .left { background: #0f172a; color: #fff; padding: 46px 40px;
+          display: flex; flex-direction: column; justify-content: center; }
+  .mark { font-size: 12px; font-weight: 600; letter-spacing: .14em;
+          text-transform: uppercase; color: #7dd3fc; }
+  .left h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em;
+             line-height: 1.25; margin: 16px 0 0; }
+  .left p { color: #94a3b8; font-size: 14px; line-height: 1.6; margin: 14px 0 0;
+            max-width: 34ch; }
+
+  /* Right: the one thing to do. */
+  .right { display: grid; place-items: center; padding: 40px; min-width: 0; }
+  .form { width: min(380px, 100%); min-width: 0; }
+  h1 { font-size: 23px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 26px; }
+  label { display: block; font-size: 11px; font-weight: 600; letter-spacing: .09em;
+          text-transform: uppercase; color: #98a2b3; margin-bottom: 8px; }
+  /* min-width: 0 matters. A text input carries an intrinsic minimum width from
+     its default size attribute, which width:100% does not override inside a
+     grid or flex parent - without this the field runs off a narrow window. */
+  input[type=text] { width: 100%; min-width: 0;
+                     font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
+                     font-size: 22px; letter-spacing: .09em; text-transform: uppercase;
+                     padding: 13px 15px; border: 1.5px solid #e4e7ec; border-radius: 10px;
+                     outline: none; background: #fcfcfd; color: #101828;
+                     transition: border-color .15s, background .15s; }
+  input[type=text]::placeholder { color: #cdd2db; }
+  input[type=text]:focus { border-color: #0f172a; background: #fff; }
+  button { width: 100%; margin-top: 16px; font: inherit; font-size: 15px; font-weight: 600;
+           color: #fff; background: #0f172a; border: 0; border-radius: 10px;
+           padding: 13px; cursor: pointer; transition: background .15s; }
+  button:hover { background: #1e293b; }
+  button:focus-visible { outline: 2px solid #0f172a; outline-offset: 2px; }
+
+  .err { margin: 0 0 22px; padding: 12px 14px; border: 1px solid #f3b7b2;
+         border-left-width: 3px; border-radius: 8px; background: #fef4f3;
+         color: #b3261e; font-size: 13.5px; line-height: 1.5; }
+
+  .foot { margin-top: 26px; font-size: 12.5px; color: #98a2b3; }
+
+  /* One column on a narrow window. The left panel keeps its heading so the
+     page still says what it is, but stops eating half the screen. */
+  @media (max-width: 720px) {
+    body { grid-template-columns: minmax(0,1fr); grid-template-rows: auto 1fr; }
+    .left { padding: 28px 24px; }
+    .left h2 { font-size: 21px; }
+    .left p { display: none; }
+    .right { padding: 32px 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 '@
 
-function New-FormPage {
-    param([string]$Error, [string]$Serial, [string]$User)
-
-    $errHtml = ''
-    if ($Error) { $errHtml = "    <p class=`"err`">$(ConvertTo-HtmlText $Error)</p>`n" }
-
-    # Say plainly when authentication is off rather than crediting a lookup to
-    # a user called "anonymous".
-    $who = ''
-    if ($User -eq 'anonymous') { $who = 'Anonymous access &ndash; authentication is off.' }
-    elseif ($User)             { $who = "Signed in as $(ConvertTo-HtmlText $User)" }
+function New-SplitPage {
+    <#
+        Both pages share one shell: the panel on the left never changes, only
+        what sits in the working column on the right.
+    #>
+    param([string]$Title, [string]$Body)
 
     @"
 <!DOCTYPE html>
@@ -162,43 +192,63 @@ function New-FormPage {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Refresh App List</title>
+<title>$(ConvertTo-HtmlText $Title)</title>
 <style>$PageCss</style>
 </head>
 <body>
-  <div class="card">
-    <h1>Refresh App List</h1>
-    <p class="sub">Enter the serial number of the machine being replaced.</p>
-$errHtml    <form method="get" action="${BasePath}lookup">
-      <label for="serial">Serial number</label>
-      <input type="text" id="serial" name="serial" autofocus autocomplete="off"
-             spellcheck="false" value="$(ConvertTo-HtmlText $Serial)" />
-      <button type="submit">Look up</button>
-    </form>
-    <p class="foot">$who</p>
+  <div class="left">
+    <div class="mark">PC Refresh</div>
+    <h2>What to install<br />on the new device</h2>
+    <p>Pulls the old device's inventory and subtracts everything the image already provides.</p>
+  </div>
+  <div class="right">
+    <div class="form">
+$Body
+    </div>
   </div>
 </body>
 </html>
 "@
 }
 
+function New-FormPage {
+    param([string]$Error, [string]$Serial, [string]$User)
+
+    $errHtml = ''
+    if ($Error) { $errHtml = "      <p class=`"err`">$(ConvertTo-HtmlText $Error)</p>`n" }
+
+    # Say plainly when authentication is off rather than crediting a lookup to
+    # a user called "anonymous".
+    $who = ''
+    if ($User -eq 'anonymous') { $who = 'Anonymous access &ndash; authentication is off.' }
+    elseif ($User)             { $who = "Signed in as $(ConvertTo-HtmlText $User)" }
+
+    $body = @"
+      <h1>Look up a device</h1>
+$errHtml      <form method="get" action="${BasePath}lookup">
+        <label for="serial">Serial number</label>
+        <input type="text" id="serial" name="serial" autofocus autocomplete="off"
+               spellcheck="false" value="$(ConvertTo-HtmlText $Serial)" />
+        <button type="submit">Look up</button>
+      </form>
+      <p class="foot">$who</p>
+"@
+
+    New-SplitPage -Title 'Refresh App List' -Body $body
+}
+
 function New-ErrorPage {
     param([string]$Title, [string]$Detail)
-    @"
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8" /><title>$(ConvertTo-HtmlText $Title)</title>
-<style>$PageCss</style></head>
-<body>
-  <div class="card">
-    <h1>$(ConvertTo-HtmlText $Title)</h1>
-    <p class="err">$(ConvertTo-HtmlText $Detail)</p>
-    <form method="get" action="$BasePath"><button type="submit">Back</button></form>
-  </div>
-</body>
-</html>
+
+    $body = @"
+      <h1>$(ConvertTo-HtmlText $Title)</h1>
+      <p class="err">$(ConvertTo-HtmlText $Detail)</p>
+      <form method="get" action="$BasePath"><button type="submit">Back</button></form>
 "@
+
+    New-SplitPage -Title $Title -Body $body
 }
+
 
 function Write-RequestLog {
     param([string]$User, [string]$Serial, [string]$Outcome)
