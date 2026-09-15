@@ -486,19 +486,27 @@ the key sits on that one machine, technicians open a URL, and nobody else ever
 holds a copy of anything.
 
 ```
-.\Start-RefreshAppServer.ps1                                  # port 5000, Windows auth, all interfaces
-.\Start-RefreshAppServer.ps1 -Port 8080
-.\Start-RefreshAppServer.ps1 -Port 5055 -AuthScheme Ntlm      # when browsers loop on the credential prompt
+.\Start-RefreshAppServer.ps1                                  # port 5000, /appfilter/, Windows auth
+.\Start-RefreshAppServer.ps1 -Port 8080 -BasePath /tools/apps/
+.\Start-RefreshAppServer.ps1 -AuthScheme Ntlm                 # when browsers loop on the credential prompt
 .\Start-RefreshAppServer.ps1 -Anonymous -BindAddress localhost  # local trial only
 ```
 
-Routes:
+Routes, all under `-BasePath` (default `/appfilter/`):
 
 | Route | Returns |
 |---|---|
-| `/` | the serial form |
-| `/lookup?serial=X` | the printable sheet, with a "look up another device" link |
-| `/health` | `OK`, for a monitor or a scheduled restart check |
+| `/appfilter/` | the serial form |
+| `/appfilter/lookup?serial=X` | the printable sheet, with a "look up another device" link |
+| `/appfilter/health` | `OK`, for a monitor or a scheduled restart check |
+
+**Why a path and not just a port.** http.sys routes by longest prefix match,
+so a second application can reserve `http://+:5000/something-else/` and run
+beside this one on the same port, in its own process, started and stopped
+independently. One firewall rule covers every application on the machine, and
+the URL handed to technicians today stays correct when the second one arrives.
+The reservation must match the path exactly — `url=http://+:5000/appfilter/`,
+not `url=http://+:5000/`.
 
 Behaviour worth knowing:
 
@@ -535,6 +543,15 @@ Behaviour worth knowing:
   across copies, can never be. `-Anonymous` turns it off and is for a local
   trial only; combined with the default `-BindAddress +` it prints a warning,
   because anyone who can reach the port could then read fleet inventory.
+- **The request loop waits on `GetContextAsync`, not `GetContext`.** The
+  synchronous call blocks inside native code where PowerShell cannot deliver
+  Ctrl+C, so the console ignored it and the window had to be killed. Waiting
+  on the task in 250 ms slices gives the host a chance to process the
+  interrupt between waits. **Unverified** — this sandbox cannot deliver
+  Ctrl+C to PowerShell at all (a bare `while ($true) { Start-Sleep }` control,
+  with no blocking call in it, also survives SIGINT here), so the reasoning is
+  sound but the fix has only been confirmed not to break request serving.
+  Check it on the real machine.
 - **Rules and credentials load before the port opens**, so a bad rules file or
   a missing key fails at startup instead of on a technician's first lookup.
 - **One bad request cannot take the server down.** The body of the request loop
@@ -559,12 +576,36 @@ Behaviour worth knowing:
 1. Copy `AppFilter.psm1`, `AppRules.csv` and `Start-RefreshAppServer.ps1` to
    the machine and fill in the token at the top of the server script.
 2. Reserve the URL once, so it does not need an elevated session to run:
-   `netsh http add urlacl url=http://+:5000/ user=DOMAIN\ServiceAccount`
+   `netsh http add urlacl url=http://+:5000/appfilter/ user=DOMAIN\ServiceAccount`
+   (or `user="NT AUTHORITY\SYSTEM"` if the startup task runs as SYSTEM). The
+   path is part of the reservation and has to match `-BasePath` exactly.
 3. Open the port to the domain profile:
    `New-NetFirewallRule -DisplayName "Refresh App List" -Direction Inbound -Protocol TCP -LocalPort 5000 -Profile Domain -Action Allow`
 4. Make it survive a reboot — a scheduled task at startup running as the
    service account, `pwsh -NoProfile -File ...\Start-RefreshAppServer.ps1`.
-5. Tell technicians `http://<machine>:5000/`.
+5. Tell technicians `http://<machine>:5000/appfilter/`. Both the short name
+   and the FQDN work once it runs as SYSTEM, because a machine account
+   registers `HOST/shortname` and `HOST/fqdn` and `HOST/` covers HTTP.
+
+### It will say "Not secure", and the startup task does not change that
+
+That warning is plain HTTP with no TLS. It has nothing to do with the service
+account, the SPN or the reservation, so nothing in the startup step affects
+it. Traffic is readable by anyone on the path: the serials looked up and the
+application inventory returned. Windows authentication is challenge-response,
+so no reusable password crosses the wire, but the data does.
+
+Fixing it properly needs a certificate the client machines already trust —
+which on a domain usually means one issued by internal PKI (AD Certificate
+Services) to the machine's own name. Then bind it to the port and serve
+`https://`:
+
+    netsh http add sslcert ipport=0.0.0.0:5000 certhash=<thumbprint> appid={<any guid>}
+
+and the listener prefix becomes `https://+:5000/appfilter/`. A self-signed
+certificate does **not** help — browsers warn about it just as loudly. Not
+built; the script has no `-UseHttps` switch yet. The code change is small; the
+certificate is the real work and it is not a coding task.
 
 ### Where this got to
 

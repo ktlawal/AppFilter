@@ -35,7 +35,11 @@
     Binding to all interfaces needs either an elevated session or a one-time
     URL reservation, which is the better answer:
 
-        netsh http add urlacl url=http://+:5000/ user=DOMAIN\ServiceAccount
+        netsh http add urlacl url=http://+:5000/appfilter/ user=DOMAIN\ServiceAccount
+
+    The path is part of the reservation. Because http.sys routes by longest
+    prefix match, a second application can reserve http://+:5000/something/
+    and run alongside this one on the same port, in its own process.
 
     And a firewall rule so other machines can reach it:
 
@@ -47,6 +51,15 @@
 param(
     [ValidateRange(1, 65535)]
     [int]$Port = 5000,
+
+    # The path this application answers on. http.sys routes by longest
+    # prefix match, so a different application can own a different path on
+    # this same port, in its own process, started and stopped independently.
+    # One firewall rule covers the lot.
+    #
+    # Whatever is set here must match the URL reservation exactly:
+    #     netsh http add urlacl url=http://+:5000/appfilter/ user=...
+    [string]$BasePath = '/appfilter/',
 
     # '+' listens on every interface. Use 'localhost' to keep it to this
     # machine, which also avoids needing a URL reservation.
@@ -119,8 +132,8 @@ $PageCss = @'
            border: 1px solid #000; background: #000; color: #fff;
            border-radius: 3px; cursor: pointer; }
   button:hover { background: #333; border-color: #333; }
-  .err { border: 0.75pt solid #000; padding: 3mm; margin: 0 0 5mm;
-         font-size: 9.5pt; }
+  .err { border: 0.75pt solid #b3261e; border-left-width: 3pt; padding: 3mm;
+         margin: 0 0 5mm; font-size: 9.5pt; color: #b3261e; background: #fdf3f2; }
   .foot { margin-top: 6mm; padding-top: 2mm; border-top: 0.5pt solid #ccc;
           font-size: 8.5pt; color: #666; }
 '@
@@ -150,7 +163,7 @@ function New-FormPage {
   <div class="card">
     <h1>Refresh App List</h1>
     <p class="sub">Enter the serial number of the machine being replaced.</p>
-$errHtml    <form method="get" action="/lookup">
+$errHtml    <form method="get" action="${BasePath}lookup">
       <label for="serial">Serial number</label>
       <input type="text" id="serial" name="serial" autofocus autocomplete="off"
              spellcheck="false" value="$(ConvertTo-HtmlText $Serial)" />
@@ -174,7 +187,7 @@ function New-ErrorPage {
   <div class="card">
     <h1>$(ConvertTo-HtmlText $Title)</h1>
     <p class="err">$(ConvertTo-HtmlText $Detail)</p>
-    <form method="get" action="/"><button type="submit">Back</button></form>
+    <form method="get" action="$BasePath"><button type="submit">Back</button></form>
   </div>
 </body>
 </html>
@@ -204,8 +217,15 @@ function Write-RequestLog {
 $rules      = Import-AppRule -Path $RulesCsv
 $credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey
 
+# A prefix has to start and end with a slash or http.sys rejects it.
+$BasePath = '/' + $BasePath.Trim('/') + '/'
+if ($BasePath -eq '//') { $BasePath = '/' }
+
+# What routes are matched against, with no trailing slash: '/appfilter'.
+$basePrefix = $BasePath.TrimEnd('/')
+
 $listener = [System.Net.HttpListener]::new()
-$listener.Prefixes.Add("http://${BindAddress}:$Port/")
+$listener.Prefixes.Add("http://${BindAddress}:${Port}${BasePath}")
 
 if ($Anonymous) {
     $listener.AuthenticationSchemes = [System.Net.AuthenticationSchemes]::Anonymous
@@ -218,11 +238,13 @@ if ($Anonymous) {
 try { $listener.Start() }
 catch {
     Write-Host ""
-    Write-Host "Could not listen on http://${BindAddress}:$Port/" -ForegroundColor Red
+    Write-Host "Could not listen on http://${BindAddress}:${Port}${BasePath}" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     Write-Host ""
     Write-Host "Binding to all interfaces needs a URL reservation, once:" -ForegroundColor Yellow
-    Write-Host "    netsh http add urlacl url=http://+:$Port/ user=$env:USERDOMAIN\$env:USERNAME"
+    Write-Host "    netsh http add urlacl url=http://+:${Port}${BasePath} user=$env:USERDOMAIN\$env:USERNAME"
+    Write-Host ""
+    Write-Host "The reservation has to match the path exactly, base path included." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Or run with -BindAddress localhost to keep it to this machine." -ForegroundColor Yellow
     exit 1
@@ -230,9 +252,9 @@ catch {
 
 Write-Host ""
 Write-Host "Refresh App List server" -ForegroundColor Green
-Write-Host "  Listening on  http://${BindAddress}:$Port/"
+Write-Host "  Listening on  http://${BindAddress}:${Port}${BasePath}"
 if ($BindAddress -eq '+') {
-    Write-Host "  Technicians   http://$($env:COMPUTERNAME):$Port/" -ForegroundColor Cyan
+    Write-Host "  Technicians   http://$($env:COMPUTERNAME):${Port}${BasePath}" -ForegroundColor Cyan
 }
 Write-Host "  Rules         $($rules.Names.Count) name, $($rules.Publishers.Count) publisher, $($rules.Patterns.Count) pattern"
 Write-Host "  Credential    $($credential.Source)"
@@ -250,9 +272,27 @@ if ($Anonymous -and $BindAddress -eq '+') {
 try {
     while ($listener.IsListening) {
 
-        $context = $listener.GetContext()
+        # GetContext() blocks inside native code, where PowerShell cannot
+        # deliver Ctrl+C - the console just ignores it and the window has to
+        # be killed. Waiting on the async version in short slices gives the
+        # host a chance to process the interrupt between waits.
+        $pending = $listener.GetContextAsync()
+        while (-not $pending.Wait(250)) {
+            if (-not $listener.IsListening) { break }
+        }
+        if (-not $pending.IsCompleted) { break }
+        $context = $pending.Result
+
         $user    = if ($context.User -and $context.User.Identity) { $context.User.Identity.Name } else { 'anonymous' }
-        $path    = $context.Request.Url.AbsolutePath
+
+        # Requests still carry the base path. Routes are matched against
+        # whatever follows it, so '/appfilter/lookup' tests as '/lookup'.
+        $path = $context.Request.Url.AbsolutePath
+        if ($basePrefix -and
+            $path.StartsWith($basePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            $path = $path.Substring($basePrefix.Length)
+        }
+        if (-not $path.StartsWith('/')) { $path = '/' + $path }
         $body    = $null
         $status  = 200
 
@@ -295,7 +335,7 @@ try {
 
                     $body = New-InstallSheetHtml -Device $result.Device -Apps $result.ToInstall `
                                 -ScanAge $result.ScanAge -SuppressedCount $result.Excluded.Count `
-                                -TotalCount $result.Apps.Count -HomeLink '/'
+                                -TotalCount $result.Apps.Count -HomeLink $BasePath
                     Write-RequestLog -User $user -Serial $serial `
                         -Outcome "$($result.ToInstall.Count) to install of $($result.Apps.Count)"
                     break
