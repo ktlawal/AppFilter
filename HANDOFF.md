@@ -556,8 +556,19 @@ Behaviour worth knowing:
   with no blocking call in it, also survives SIGINT here), so the reasoning is
   sound but the fix has only been confirmed not to break request serving.
   Check it on the real machine.
-- **"Conflicts with an existing registration" has two causes, and the likelier
-  one is a reservation held by another account.** Windows does *not* say
+- **A port is http OR https in http.sys, never both.** TLS is bound per
+  `ip:port`, so the whole port is one or the other, whatever the paths under
+  it. An existing `http://+:5000/appfilter/` reservation therefore blocks
+  `https://+:5000/appfilter/` — the listener reports "conflicts with an
+  existing registration", and `netsh http add urlacl` for the https URL
+  quietly fails to take. Observed on the real machine: the https reservation
+  appeared to have been created and `show urlacl` for it returned nothing,
+  while `netsh http show urlacl | Select-String ':5000'` revealed the http one
+  still sitting there. **Moving to https means deleting the http reservation,
+  not adding a second one.** Technicians' http bookmarks stop working at that
+  moment, which is the intent.
+- **"Conflicts with an existing registration" also covers a reservation held
+  by another account.** Windows does *not* say
   "Access is denied" for that, as you might expect — it says conflict. So a
   `netsh http add urlacl ... user="NT AUTHORITY\SYSTEM"` reservation, made in
   preparation for the startup task, blocks an interactive test run by a person

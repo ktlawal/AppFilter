@@ -258,9 +258,20 @@ catch {
     # situation on other platforms says "Address already in use".
     if ($reason -match 'conflicts with an existing registration|Address already in use') {
 
-        Write-Host "Two different things produce this message." -ForegroundColor Yellow
+        Write-Host "Three different things produce this message." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "1. The prefix is RESERVED FOR ANOTHER ACCOUNT." -ForegroundColor Yellow
+        Write-Host "1. The SAME PORT IS ALREADY CLAIMED FOR THE OTHER SCHEME." -ForegroundColor Yellow
+        Write-Host "   A port is http or https in http.sys, never both - TLS is bound"
+        Write-Host "   per ip:port, so the whole port is one or the other. An"
+        Write-Host "   http://+:${Port}${BasePath} reservation therefore blocks https on"
+        Write-Host "   this port, and blocks adding the https reservation too."
+        Write-Host "   Look for the other scheme on this port:"
+        Write-Host "       netsh http show urlacl | Select-String ':$Port'"
+        Write-Host "   then drop it and reserve this scheme instead:"
+        Write-Host "       netsh http delete urlacl url=http://+:${Port}${BasePath}"
+        Write-Host "       netsh http add urlacl url=${scheme}://+:${Port}${BasePath} user=`"$env:USERDOMAIN\$env:USERNAME`""
+        Write-Host ""
+        Write-Host "2. The prefix is RESERVED FOR ANOTHER ACCOUNT." -ForegroundColor Yellow
         Write-Host "   Windows reports that as a conflict, not as access denied."
         Write-Host "   A reservation made for NT AUTHORITY\SYSTEM does not let you"
         Write-Host "   listen as $env:USERNAME. Check who holds it:"
@@ -271,7 +282,7 @@ catch {
         Write-Host "       netsh http delete urlacl url=${scheme}://+:${Port}${BasePath}"
         Write-Host "       netsh http add urlacl url=${scheme}://+:${Port}${BasePath} user=`"$env:USERDOMAIN\$env:USERNAME`""
         Write-Host ""
-        Write-Host "2. Something is already listening - usually an earlier instance." -ForegroundColor Yellow
+        Write-Host "3. Something is already listening - usually an earlier instance." -ForegroundColor Yellow
         Write-Host "   A reboot rules this one out. Otherwise:"
         Write-Host "       Get-NetTCPConnection -LocalPort $Port -State Listen |"
         Write-Host "           ForEach-Object { Get-Process -Id `$_.OwningProcess }"
