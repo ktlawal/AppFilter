@@ -268,16 +268,6 @@ publisher string. Match on `appName`.
   `Rule,MatchType,Reason,Publisher,Active,Source,AddedOn,AddedBy,Serial`.
   Replaces `BaseImageApps.csv` and the two hardcoded arrays that used to live
   in the script.
-- `Test-ServiceAccount.ps1` — run this **through the scheduled task, as
-  SYSTEM**, before pointing that task at the server. A task that exits 1 says
-  nothing about why; this writes a report of what that account can actually
-  do: identity, PowerShell version, execution policy, **language mode**, write
-  access to the folder, module import, rule load, credential resolution,
-  whether `HttpListener` and `HMACSHA256` can be constructed at all, and the
-  http.sys reservation, certificate binding and port state. Every step is
-  wrapped separately so one failure does not hide the rest, and it falls back
-  to `%windir%\Temp` if it cannot write beside itself. It never prints the
-  secret, only its length.
 - `Find-ServerCertificate.ps1` — read-only. Lists the local machine
   certificates that could serve https for this machine, with a verdict and a
   reason for each rejection, and prints the binding command. See the https
@@ -630,6 +620,34 @@ Behaviour worth knowing:
   **console-only**. Rules are still edited by running `Get-RefreshAppList.ps1`
   or by hand. Adding it to the web page means letting a browser write to
   `AppRules.csv`, which deserves its own thought.
+
+### The startup task was attempted and reverted
+
+The server runs **started by hand** in an elevated console. A scheduled task
+running as `NT AUTHORITY\SYSTEM` was set up and backed out: it exited 1 on
+every run and left nothing in the log to say why, because the server's
+`FAILED TO START` line only covers the listener's own catch block — anything
+throwing earlier (module import, rules file, a blocked type constructor) is
+silent, and an unwritable log directory would swallow the line even when
+reached. Two very different causes, identical silence.
+
+The leading unproven theory is **Constrained Language Mode**: this estate
+enforces it somewhere (a `Start-Job` language-mode error turned up much
+earlier in the project), and under it `[System.Net.HttpListener]::new()` and
+the module's `HMACSHA256` calls are blocked outright — before any error
+handling. Policy can apply differently to SYSTEM than to an interactive
+admin, which would explain a script that works in a console and dies under a
+task. Unconfirmed. A probe script that would have settled it
+(`Test-ServiceAccount.ps1`, reporting language mode, write access, module
+import and type construction as the task's own account) was written and
+removed with the rest of the step; it is in the history if wanted.
+
+What this costs: **the server does not survive a reboot**, and the console
+that started it has to stay open. Whoever picks this up should either resolve
+the language-mode question with whoever owns AppLocker/WDAC, or wrap the
+script as a real service.
+
+Everything below describes that task, for when it is taken up again.
 
 ### Running it under the startup task
 
