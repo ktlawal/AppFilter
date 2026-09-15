@@ -206,7 +206,11 @@ else {
 
         Write-Host ""
         Write-Host "  To bind it, elevated:" -ForegroundColor Cyan
-        Write-Host "    netsh http add sslcert ipport=0.0.0.0:$Port certhash=$($u.Thumbprint) appid=$([guid]::NewGuid().ToString('B')) certstorename=MY"
+        # appid has to be quoted. Unquoted, PowerShell reads {...} as a script
+        # block and the hyphens inside the GUID as subtraction operators, and
+        # the line fails to parse before netsh ever runs.
+        $appId = [guid]::NewGuid().ToString('B')
+        Write-Host "    netsh http add sslcert ipport=0.0.0.0:$Port certhash=$($u.Thumbprint) `"appid=$appId`" certstorename=MY"
         Write-Host ""
         Write-Host ("  " + ("-" * 68))
         Write-Host ""
@@ -227,4 +231,7 @@ Write-Host "  Then start the server with -UseHttps, and remember the URL"
 Write-Host "  reservation is scheme-specific:" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "      netsh http add urlacl url=https://+:$Port/appfilter/ user=`"NT AUTHORITY\SYSTEM`""
+Write-Host ""
+Write-Host "  Quote the appid and the user, or PowerShell mangles both before" -ForegroundColor DarkGray
+Write-Host "  netsh sees them." -ForegroundColor DarkGray
 Write-Host ""
