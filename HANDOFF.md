@@ -369,9 +369,9 @@ against live devices return sensible counts (`6 to install of 71`,
 | `Test-AppFilter.ps1` | 79 cases: normalizers, classification against two real inventories, API envelope shapes, HTML escaping. Needs no credential and no network. **Run it after touching a normalizer or the rules file.** | No |
 | `Debug-AbsoluteLookup.ps1` | Run when a lookup says "no device matched" for a device you believe exists. Separates a wrong-tenant token, a token that cannot read devices, and a serial that is genuinely gone. | **Yes** |
 | `Find-ServerCertificate.ps1` | Read-only. Finds a certificate that can serve https, says whether it chains, and prints the binding command. | No |
-| `Application-List-Technician-Guide.docx` | Two-page how-to for technicians, for the SharePoint library. **The URL in it is a placeholder** — replace `https://<lab-machine>.<domain>:5000/appfilter/` and the contact line before publishing. | No |
-| `Application-List-Quick-Reference.docx` | One page: the URL and the three routes, nothing else. For pinning up or keeping open. Host name is a placeholder. | No |
-| `Application-List-Operator-Reference.docx` | Routes, status codes, every script's parameters, and the start/stop commands. For whoever maintains the tool. Host name is a placeholder. | No |
+| `Application-List-Technician-Guide.docx` | Two-page how-to for technicians, for the SharePoint library. **The URL in it is a placeholder** — replace `https://<lab-machine>.<domain>:5000/appfilter/` and the contact line before publishing. Byline and Word document properties read `[Your Name]` / `[Department]` — swap both before publishing. | No |
+| `Application-List-Quick-Reference.docx` | One page: the URL and the three routes, nothing else. For pinning up or keeping open. Host name is a placeholder. Byline and Word document properties read `[Your Name]` / `[Department]` — swap both before publishing. | No |
+| `Application-List-Operator-Reference.docx` | Routes, status codes, every script's parameters, and the start/stop commands. For whoever maintains the tool. Host name is a placeholder. Byline and Word document properties read `[Your Name]` / `[Department]` — swap both before publishing. | No |
 | `HANDOFF.md` | This file. | No |
 
 **Three files carry the key** — the two front ends and the lookup diagnostic.
