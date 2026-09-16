@@ -370,6 +370,7 @@ against live devices return sensible counts (`6 to install of 71`,
 | `Debug-AbsoluteLookup.ps1` | Run when a lookup says "no device matched" for a device you believe exists. Separates a wrong-tenant token, a token that cannot read devices, and a serial that is genuinely gone. | **Yes** |
 | `Find-ServerCertificate.ps1` | Read-only. Finds a certificate that can serve https, says whether it chains, and prints the binding command. | No |
 | `Application-List-Technician-Guide.docx` | Two-page how-to for technicians, for the SharePoint library. **The URL in it is a placeholder** — replace `https://<lab-machine>.<domain>:5000/appfilter/` and the contact line before publishing. | No |
+| `Application-List-Quick-Reference.docx` | One page: the URL and the three routes, nothing else. For pinning up or keeping open. Host name is a placeholder. | No |
 | `Application-List-Operator-Reference.docx` | Routes, status codes, every script's parameters, and the start/stop commands. For whoever maintains the tool. Host name is a placeholder. | No |
 | `HANDOFF.md` | This file. | No |
 
