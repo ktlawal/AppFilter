@@ -811,7 +811,7 @@ each:
 | | Finding | State |
 |---|---|---|
 | H-1 | No authorization — any domain account is served | **Open, deferred.** An AD group for technicians probably exists; pending a decision. |
-| H-2 | API key readable, and scripts **writable**, by Authenticated Users | **Open — act on this.** See below. |
+| H-2 | API key readable by anyone who can log into the machine | **Accepted**, after reassessment. See below. |
 | H-3 | Absolute token had no IP restriction | **Closed.** Approved IP Addresses now set to the host's egress IP; verified by a request from a non-approved address being rejected. |
 | M-1 | Exception text rendered to the browser | **Fixed.** Generic sentence on the page, detail to the log. |
 | M-2 | No rate limiting; single-threaded | **Accepted.** External access is blocked, the token is IP-bound, and H-1 will narrow the population further. |
@@ -820,15 +820,30 @@ each:
 | L-3 | Logs grew without bound | **Fixed.** Rotates at 5 MB, one generation kept. |
 | L-4 | `-Anonymous` served the network with only a warning | **Fixed.** Refused unless `-AllowAnonymousOnNetwork` is also given. |
 
-**H-2 is the one still worth acting on, and it is worse than first written.**
-The folder's ACL grants `NT AUTHORITY\Authenticated Users: Modify` — inherited
-from the root of `C:\`, which hands that down to anything created there. That
-is not only read access to a live API key; it is **write access to a script
-SYSTEM executes at every boot**. Creating the folder outside a user profile was
-right; the drive root is the trap. Fix by breaking inheritance and granting
-only SYSTEM and Administrators, on `C:\Solutions` and below — the parent
-matters too, since delete rights there would let someone replace the child
-folder whatever its own ACL says.
+**H-2 was first written as urgent and that was wrong.** The ACL does grant
+`NT AUTHORITY\Authenticated Users: Modify`, inherited from the root of `C:\`,
+which reads as "every domain account can rewrite a script SYSTEM runs at boot".
+But reaching those files needs an interactive logon or the administrative
+share, and **both require local administrator rights**. The effective
+population is the machine's administrators, not the domain.
+
+The technicians are administrators on that machine, so tightening the ACL
+would constrain nobody — an administrator resets any permission at will. The
+change was declined on that basis and the reasoning is sound. **Do not
+re-raise this as an ACL problem.**
+
+What is real, and worth stating without alarm: a single compromised technician
+account yields the Absolute token *and* the ability to plant code that runs as
+SYSTEM at every boot on an always-on machine. That is tolerable only because
+H-3 is done — with Approved IP Addresses on the token, a stolen key is inert
+outside the corporate egress.
+
+The question that would actually change this is not about permissions but
+about logins: **who needs interactive access to the lab machine?** The web
+server exists so technicians do not hold a copy of the credential. If every
+technician can log in and read it, that property is weakened through the login
+path rather than the distribution path. Narrowing RDP, not ACLs, is what would
+restore it — a conversation for the supervisor, alongside H-1.
 
 **On CSP:** the policy allows exactly one inline script, by hash —
 `'unsafe-hashes'` plus the SHA-256 of `window.print()`, which is the sheet's
