@@ -156,7 +156,7 @@ $PageCss = @'
   input[type=text] { width: 100%; min-width: 0;
                      font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
                      font-size: 22px; letter-spacing: .09em; text-transform: uppercase;
-                     padding: 13px 15px; border: 1.5px solid #e4e7ec; border-radius: 10px;
+                     padding: 9px 15px; border: 1.5px solid #e4e7ec; border-radius: 10px;
                      outline: none; background: #fcfcfd; color: #101828;
                      transition: border-color .15s, background .15s; }
   input[type=text]::placeholder { color: #cdd2db; }

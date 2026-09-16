@@ -621,33 +621,34 @@ Behaviour worth knowing:
   or by hand. Adding it to the web page means letting a browser write to
   `AppRules.csv`, which deserves its own thought.
 
-### The startup task was attempted and reverted
+### The startup task works. Verified end to end
 
-The server runs **started by hand** in an elevated console. A scheduled task
-running as `NT AUTHORITY\SYSTEM` was set up and backed out: it exited 1 on
-every run and left nothing in the log to say why, because the server's
-`FAILED TO START` line only covers the listener's own catch block — anything
-throwing earlier (module import, rules file, a blocked type constructor) is
-silent, and an unwritable log directory would swallow the line even when
-reached. Two very different causes, identical silence.
+The server runs under a scheduled task as `NT AUTHORITY\SYSTEM`, starts at
+boot, and **survived a real reboot**. Confirmed on the live machine: a fresh
+`STARTED` line after boot, a real lookup returning `16 to install of 72`
+attributed to a domain account, and the page loading with nobody having
+touched anything.
 
-The leading unproven theory is **Constrained Language Mode**: this estate
-enforces it somewhere (a `Start-Job` language-mode error turned up much
-earlier in the project), and under it `[System.Net.HttpListener]::new()` and
-the module's `HMACSHA256` calls are blocked outright — before any error
-handling. Policy can apply differently to SYSTEM than to an interactive
-admin, which would explain a script that works in a console and dies under a
-task. Unconfirmed. A probe script that would have settled it
-(`Test-ServiceAccount.ps1`, reporting language mode, write access, module
-import and type construction as the task's own account) was written and
-removed with the rest of the step; it is in the history if wanted.
+**Edge signs in silently, with no GPO, no `AuthServerAllowlist` and no
+`-AuthScheme Ntlm`.** Running as SYSTEM makes the listener the machine
+account, which already owns `HOST/<host>`, and `HOST/` covers HTTP — so
+Kerberos works on the FQDN. That closes the SPN question that shaped three
+separate decisions earlier in this project; none of the workarounds are
+needed and none are in use.
 
-What this costs: **the server does not survive a reboot**, and the console
-that started it has to stay open. Whoever picks this up should either resolve
-the language-mode question with whoever owns AppLocker/WDAC, or wrap the
-script as a real service.
+It took two attempts. The first failed with exit 1 and nothing in the log,
+which sent the diagnosis toward Constrained Language Mode. **That theory was
+wrong** — the second attempt reached the listen loop, so `HttpListener` and
+`HMACSHA256` construct fine as SYSTEM. What actually fixed it was rebuilding
+from a clean state (no leftover task, no process holding the port, the
+reservation on SYSTEM) and capturing the task's own output from the first
+run, rather than registering a task that could only report an exit code.
+**Register a task with `*>` capture in its action from the outset**; it costs
+nothing and it is the difference between one round and four.
 
-Everything below describes that task, for when it is taken up again.
+One earlier alarm was also false: a missing `STARTED` line looked like SYSTEM
+being unable to write the log. It had simply been read mid-write — the line
+was there.
 
 ### Running it under the startup task
 
@@ -797,11 +798,20 @@ real envelope.
 **Next: step 5, the startup task**, run as `NT AUTHORITY\SYSTEM` — which is
 also the expected fix for the SPN problem above.
 
-**Still unverified:** whether the auto-start survives a reboot; whether
-running as `SYSTEM` does restore hostname sign-on; and a lookup from a second
-machine by a second person, which is the case that actually matters and the
-one that proves the attribution story (the log line should name that
-technician, not `anonymous`).
+**Still unverified:** a lookup from a second machine by a second person.
+Every real lookup so far has been from the lab machine under one account, so
+the case that actually matters to the attribution story — a technician at
+their own desk, their name in the log — has not been exercised.
+
+**Known and deliberate gap: there is no authorization, only authentication.**
+Any domain account that can reach the port gets served; the caller's name is
+logged but never checked. In practice that is most of the organisation, and
+what they can read is fleet inventory — device names, assigned users, serials
+and installed applications. The fix is about fifteen lines: an
+`-AllowedGroup` parameter and a `WindowsPrincipal.IsInRole` test in the
+request loop, refusals logged, defaulting to today's behaviour so nothing
+breaks when it is omitted. Raised, understood, and deferred by the operator —
+not overlooked.
 
 Everything not listed as verified on the real machine was tested against a
 mocked API — all routes, the injection case, the log, and four concurrent
