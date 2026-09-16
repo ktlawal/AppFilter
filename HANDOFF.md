@@ -508,6 +508,17 @@ and a footer giving the install count and how many applications were
 suppressed. A non-active agent or a scan older than 30 days appears as a boxed
 warning on the sheet itself, not just in the console.
 
+Under that footer is a collapsed **Not on this list, and why** block: every
+suppressed application with its version, grouped by the reason that caught it.
+It exists for one question — the user says they had X, it is not on the sheet,
+was it filtered out or was it never in the inventory? — which is why it is
+closed by default and carries `class="screen-only"`, so it never reaches the
+paper. It renders only when the caller passes `-Suppressed`; a caller that
+passes only `-SuppressedCount` gets the sheet exactly as it was. Both front
+ends pass it. Reasons render in a fixed order (Base image, Driver / OEM,
+Runtime / component) with anything unexpected after them, so a new reason
+string shows up rather than disappearing.
+
 Open it, click Print. The button calls `window.print()`; it and the rest of the
 screen-only furniture (grey backdrop, card padding, drop shadow) are hidden
 under `@media print`, so what reaches the paper is just the sheet. Verified by

@@ -530,6 +530,7 @@ try {
 
                     $body = New-InstallSheetHtml -Device $result.Device -Apps $result.ToInstall `
                                 -ScanAge $result.ScanAge -SuppressedCount $result.Excluded.Count `
+                                -Suppressed $result.Excluded `
                                 -TotalCount $result.Apps.Count -HomeLink $BasePath
                     Write-RequestLog -User $user -Serial $serial `
                         -Outcome "$($result.ToInstall.Count) to install of $($result.Apps.Count)"

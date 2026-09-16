@@ -528,6 +528,11 @@ function New-InstallSheetHtml {
         [int]$SuppressedCount,
         [int]$TotalCount,
 
+        # The suppressed applications themselves, for the collapsed list at the
+        # foot of the sheet. Optional: a caller that passes only the count gets
+        # the sheet exactly as it was.
+        [object[]]$Suppressed = @(),
+
         # When the sheet is served from a web front end rather than saved to
         # disk, this puts a "new lookup" link in the toolbar. Screen only.
         [string]$HomeLink
@@ -566,6 +571,51 @@ function New-InstallSheetHtml {
     $homeHtml = ''
     if ($HomeLink) {
         $homeHtml = "    <a class=`"hint`" href=`"$(ConvertTo-HtmlText $HomeLink)`">&larr; look up another device</a>`n"
+    }
+
+    # The suppressed list answers one question and only one: the user says they
+    # had X, it is not on the sheet - was it filtered out, or was it never in
+    # the inventory? So it is collapsed, and it is screen-only: a lookup, not a
+    # second list to work through. Names and reasons only. Giving it versions
+    # and publishers would make it read like the install table above it.
+    $filtered = @($Suppressed)
+    $filteredHtml = ''
+    if ($filtered.Count -gt 0) {
+
+        # The reasons the rules actually carry, in a fixed order, then anything
+        # else alphabetically - a reason nobody anticipated still renders
+        # rather than vanishing from the page.
+        $order  = @('Base image', 'Driver / OEM', 'Runtime / component')
+        $groups = @($filtered | Group-Object -Property Reason)
+        $sorted = @($order | ForEach-Object { $name = $_; $groups | Where-Object { $_.Name -eq $name } }) +
+                  @($groups | Where-Object { $order -notcontains $_.Name } | Sort-Object Name)
+
+        $sections = foreach ($g in $sorted) {
+            $items = foreach ($a in @($g.Group | Sort-Object AppName)) {
+                # The version rides along: "the image provides it" stops being
+                # the whole answer as soon as the user needs the build they had.
+                $ver = ''
+                if ([string]$a.Version) {
+                    $ver = " <span class=`"v`">$(ConvertTo-HtmlText ([string]$a.Version))</span>"
+                }
+                "          <li>$(ConvertTo-HtmlText ([string]$a.AppName))$ver</li>"
+            }
+            $label = if ($g.Name) { [string]$g.Name } else { 'Other' }
+            @"
+        <h2>$(ConvertTo-HtmlText $label) <span>($($g.Count))</span></h2>
+        <ul>
+$($items -join "`n")
+        </ul>
+"@
+        }
+
+        $filteredHtml = @"
+    <details class="filtered screen-only">
+      <summary>Not on this list, and why ($($filtered.Count))</summary>
+      <p class="why">These were on the old device and are left off because the new image already provides them. If something you expected is in neither list, it was not in the inventory at all - ask the user rather than assuming it is gone.</p>
+$($sections -join "`n")
+    </details>
+"@ + "`n"
     }
 
     @"
@@ -614,6 +664,19 @@ function New-InstallSheetHtml {
   .none { color: #555; font-style: italic; }
   .foot { margin-top: 4mm; padding-top: 2mm; border-top: 0.5pt solid #000;
           font-size: 8.5pt; color: #333; }
+  .filtered { margin-top: 2mm; font-size: 9pt; }
+  .filtered summary { cursor: pointer; font-weight: 600; color: #333;
+                      padding: 1mm 0; }
+  .filtered .why { color: #444; margin: 1mm 0 2mm; max-width: 150mm; }
+  .filtered h2 { font-size: 7.5pt; letter-spacing: .06em; text-transform: uppercase;
+                 color: #555; margin: 3mm 0 1mm; }
+  .filtered h2 span { font-weight: 400; letter-spacing: 0; text-transform: none; }
+  /* Column width, not a column count: the list reflows instead of squeezing
+     three columns onto a phone. */
+  .filtered ul { columns: 52mm; column-gap: 6mm; margin: 0; padding-left: 4.5mm;
+                 font-size: 8.5pt; color: #333; }
+  .filtered li { break-inside: avoid; margin: 0 0 0.8mm; }
+  .filtered li .v { color: #6a6a6a; }
 
   /* What actually reaches the paper: the sheet, nothing else. */
   @media print {
@@ -647,7 +710,7 @@ $($rows -join "`n")
       </tbody>
     </table>
     <p class="foot">$($Apps.Count) to install &middot; $SuppressedCount of $TotalCount inventoried applications suppressed as base image, driver or runtime.</p>
-  </div>
+$filteredHtml  </div>
 </body>
 </html>
 "@

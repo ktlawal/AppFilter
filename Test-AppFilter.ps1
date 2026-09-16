@@ -225,6 +225,44 @@ Assert-Key '&lt;'                          '&amp;lt;'           $htmlFn
 Assert-Key 'Realtek High Definition Audio' 'Realtek High Definition Audio' $htmlFn
 Assert-Key ''                              ''                   $htmlFn
 
+Write-Host "`nSuppressed list on the sheet" -ForegroundColor Cyan
+# The collapsed list answers one question: the user says they had X and it is
+# not on the sheet - was it filtered out, or was it never in the inventory? So
+# it has to carry the name, the version and the reason it was filtered, and it
+# must never reach the printer.
+$shDevice = [pscustomobject]@{ deviceName = 'D'; serialNumber = 'S1'; username = 'u'
+                               systemModel = 'm'; agentStatus = 'A' }
+$shApps   = @([pscustomobject]@{ AppName = 'Bluebeam Revu'; Version = '21.0'; Publisher = 'Bluebeam' })
+$shSupp   = @(
+    [pscustomobject]@{ AppName = 'Google Chrome';      Version = '128.0.6613.120'; Publisher = 'Google';  Reason = 'Base image' }
+    [pscustomobject]@{ AppName = 'Realtek Audio';      Version = '6.0.9564.1';     Publisher = 'Realtek'; Reason = 'Driver / OEM' }
+    [pscustomobject]@{ AppName = 'No Version';         Version = '';               Publisher = 'x';       Reason = 'Base image' }
+    [pscustomobject]@{ AppName = '<script>x</script>'; Version = '1"2';            Publisher = 'x';       Reason = 'Base image' }
+)
+$sheet = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 2 `
+             -SuppressedCount $shSupp.Count -Suppressed $shSupp -TotalCount 5
+
+Assert-Envelope 'details, collapsed'    ($sheet -match '<details class="filtered screen-only">')  'True'
+Assert-Envelope 'summary carries count' ($sheet -match 'Not on this list, and why \(4\)')         'True'
+# screen-only is the whole print story: the rule that hides it already exists.
+Assert-Envelope 'print rule present'    ($sheet -match '\.screen-only \{ display: none !important; \}') 'True'
+Assert-Envelope 'grouped: base image'   ($sheet -match '<h2>Base image <span>\(3\)</span></h2>')  'True'
+Assert-Envelope 'grouped: driver'       ($sheet -match '<h2>Driver / OEM <span>\(1\)</span></h2>') 'True'
+Assert-Envelope 'version rides along'   ($sheet -match '<li>Google Chrome <span class="v">128\.0\.6613\.120</span></li>') 'True'
+# No version means a name and nothing else, not an empty span hanging off it.
+Assert-Envelope 'no version, no span'   ($sheet -match '<li>No Version</li>')                     'True'
+# Both fields come from the API, so both are escaped - the install table above
+# is not the only place a crafted application name reaches the page.
+Assert-Envelope 'name escaped'          ($sheet -match '<li>&lt;script&gt;x&lt;/script&gt;')      'True'
+Assert-Envelope 'version escaped'       ($sheet -match 'class="v">1&quot;2</span>')               'True'
+Assert-Envelope 'no raw script tag'     ($sheet -match '<script>')                                'False'
+
+# A caller that passes only the count still gets the sheet it always got.
+$shPlain = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 2 `
+               -SuppressedCount 4 -TotalCount 5
+Assert-Envelope 'no list, no details'   ($shPlain -match '<details')                              'False'
+Assert-Envelope 'footer count stands'   ($shPlain -match '4 of 5 inventoried applications')       'True'
+
 Write-Host ""
 if ($failures -eq 0) { Write-Host "All cases passed." -ForegroundColor Green }
 else { Write-Host "$failures case(s) failed." -ForegroundColor Red; exit 1 }

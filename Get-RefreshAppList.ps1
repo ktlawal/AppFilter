@@ -243,7 +243,8 @@ if (-not $NoSheet) {
     }
 
     $html = New-InstallSheetHtml -Device $device -Apps $toInstall -ScanAge $scanAge `
-                                 -SuppressedCount $excluded.Count -TotalCount $result.Apps.Count
+                                 -SuppressedCount $excluded.Count -Suppressed $excluded `
+                                 -TotalCount $result.Apps.Count
     $written = Save-InstallSheet -Html $html -Path $sheetPath
     if ($written) {
         Write-Host "Printable sheet saved to $written" -ForegroundColor Green
