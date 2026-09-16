@@ -257,6 +257,20 @@ Assert-Envelope 'name escaped'          ($sheet -match '<li>&lt;script&gt;x&lt;/
 Assert-Envelope 'version escaped'       ($sheet -match 'class="v">1&quot;2</span>')               'True'
 Assert-Envelope 'no raw script tag'     ($sheet -match '<script>')                                'False'
 
+# The footer stated "1 of 0" on a real device: one application, suppressed, and
+# a total of zero. A total below the parts it is made of cannot be true, so the
+# sheet computes it rather than printing the caller's arithmetic.
+$oneSupp = @([pscustomobject]@{ AppName = 'BitLocker Drive Encryption'; Version = '10.0.26100.9444'
+                                Publisher = 'Microsoft'; Reason = 'Base image' })
+$shOne = New-InstallSheetHtml -Device $shDevice -Apps @() -ScanAge 1 `
+             -SuppressedCount 1 -Suppressed $oneSupp -TotalCount 0
+Assert-Envelope 'total never below parts' ($shOne -match '0 to install &middot; 1 of 1 inventoried') 'True'
+Assert-Envelope 'no "1 of 0"'             ($shOne -match '1 of 0')                                  'False'
+# A caller that has the real total keeps it - the clamp is a floor, not a rewrite.
+$shBig = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 1 `
+             -SuppressedCount 4 -TotalCount 260
+Assert-Envelope 'real total survives'     ($shBig -match '4 of 260 inventoried')                    'True'
+
 # A caller that passes only the count still gets the sheet it always got.
 $shPlain = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 2 `
                -SuppressedCount 4 -TotalCount 5

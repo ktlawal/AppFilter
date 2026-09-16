@@ -508,6 +508,13 @@ and a footer giving the install count and how many applications were
 suppressed. A non-active agent or a scan older than 30 days appears as a boxed
 warning on the sheet itself, not just in the console.
 
+The footer's total is computed, not trusted: it is raised to at least what
+the two lists add up to. That is there because a device with a single
+application printed "1 of 0" - `$classified` inside `Get-RefreshApps` was the
+one collection not wrapped in `@()`, a one-row `foreach` yields a scalar, and
+`.Count` on a scalar is `$null` in Windows PowerShell 5.1. The wrap is the
+fix; the clamp means the arithmetic cannot go wrong on the page again.
+
 Under that footer is a collapsed **Not on this list, and why** block: every
 suppressed application with its version, grouped by the reason that caught it.
 It exists for one question — the user says they had X, it is not on the sheet,

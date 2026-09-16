@@ -568,6 +568,11 @@ function New-InstallSheetHtml {
 
     $scanText = if ($null -ne $ScanAge) { "$ScanAge day(s) ago" } else { 'unknown' }
 
+    # A total below what the two lists already add up to is arithmetic that
+    # cannot be true, and it reached a technician once. Trust the parts.
+    $parts = @($Apps).Count + $SuppressedCount
+    if ($TotalCount -lt $parts) { $TotalCount = $parts }
+
     $homeHtml = ''
     if ($HomeLink) {
         $homeHtml = "    <a class=`"hint`" href=`"$(ConvertTo-HtmlText $HomeLink)`">&larr; look up another device</a>`n"
@@ -817,7 +822,12 @@ function Get-RefreshApps {
         }
     }
 
-    $classified = foreach ($a in $apps) {
+    # @() and not a bare assignment: a foreach over one row yields a scalar,
+    # and .Count on a scalar is $null in Windows PowerShell 5.1. Every other
+    # collection in this function is wrapped for the same reason; this one was
+    # not, and a device with a single application printed "1 of 0" on its
+    # sheet because $result.Apps.Count came back empty.
+    $classified = @(foreach ($a in $apps) {
         $reason = Get-AppClassification -App $a -Rules $Rules
         [pscustomobject]@{
             AppName   = $a.appName
@@ -828,7 +838,7 @@ function Get-RefreshApps {
             Excluded  = [bool]$reason
             Reason    = $reason
         }
-    }
+    })
 
     $toInstall = @($classified | Where-Object { -not $_.Excluded } | Sort-Object AppName)
     for ($i = 0; $i -lt $toInstall.Count; $i++) {
