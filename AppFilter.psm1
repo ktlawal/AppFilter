@@ -222,6 +222,35 @@ function Read-IndexSelection {
     return $picked
 }
 
+function ConvertTo-CsvSafeText {
+    <#
+        Neutralises a value that a spreadsheet would treat as a formula.
+
+        Application names come from the API - which is to say, from software
+        installed on managed devices - and a name beginning = + - or @ runs as
+        a formula the moment someone opens AppRules.csv in Excel. Prefixing an
+        apostrophe is the standard defence.
+
+        Paired with ConvertFrom-CsvSafeText, which takes it back off on read,
+        so the stored rule still matches the application it came from. Escaping
+        without that pairing would silently break every rule it touched.
+    #>
+    param([string]$Text)
+    if (-not $Text) { return $Text }
+    if ($Text -match '^[=+@\-\t\r]') { return "'" + $Text }
+    return $Text
+}
+
+function ConvertFrom-CsvSafeText {
+    <# Reverses ConvertTo-CsvSafeText. Only strips an apostrophe that is
+       actually guarding a formula character, so a rule legitimately beginning
+       with one is left alone. #>
+    param([string]$Text)
+    if (-not $Text) { return $Text }
+    if ($Text -match "^'[=+@\-\t\r]") { return $Text.Substring(1) }
+    return $Text
+}
+
 function Import-AppRule {
     <#
         Loads AppRules.csv and buckets it by MatchType. One file, three kinds
@@ -252,6 +281,9 @@ function Import-AppRule {
     foreach ($row in @(Import-Csv $Path)) {
 
         if (-not $row.Rule) { continue }
+
+        # Undo the spreadsheet guard before the value is used for matching.
+        $row.Rule = ConvertFrom-CsvSafeText $row.Rule
         if ($row.Active -and $row.Active.Trim() -notmatch '^(yes|true|1)$') { $skipped++; continue }
 
         $reason = if ($row.Reason) { $row.Reason.Trim() } else { 'Base image' }
@@ -356,10 +388,10 @@ function Add-AppRule {
         }
         [void]$keys.Add($k)
         $added.Add([pscustomobject]@{
-            Rule      = $app.AppName
+            Rule      = ConvertTo-CsvSafeText $app.AppName
             MatchType = 'Name'
             Reason    = $Reason
-            Publisher = $app.Publisher
+            Publisher = ConvertTo-CsvSafeText $app.Publisher
             Active    = 'Yes'
             Source    = 'refresh-prompt'
             AddedOn   = $stamp
@@ -764,4 +796,5 @@ Export-ModuleMember -Function ConvertTo-NormalizedAppName, ConvertTo-NormalizedP
                               Get-AbsoluteCredential, Invoke-AbsoluteApi, Get-AbsoluteV3,
                               Get-RefreshApps, New-InstallSheetHtml, ConvertTo-HtmlText,
                               Save-InstallSheet, Read-IndexSelection, ConvertTo-Base64Url,
-                              Get-DataProperty, Get-PageData, Get-NextPageToken
+                              Get-DataProperty, Get-PageData, Get-NextPageToken,
+                              ConvertTo-CsvSafeText, ConvertFrom-CsvSafeText

@@ -803,6 +803,45 @@ Every real lookup so far has been from the lab machine under one account, so
 the case that actually matters to the attribution story — a technician at
 their own desk, their name in the log — has not been exercised.
 
+### Security audit, 16 Sep 2026
+
+A full read of the application plus live probing. Nine findings; the state of
+each:
+
+| | Finding | State |
+|---|---|---|
+| H-1 | No authorization — any domain account is served | **Open, deferred.** An AD group for technicians probably exists; pending a decision. |
+| H-2 | API key readable, and scripts **writable**, by Authenticated Users | **Open — act on this.** See below. |
+| H-3 | Absolute token had no IP restriction | **Closed.** Approved IP Addresses now set to the host's egress IP; verified by a request from a non-approved address being rejected. |
+| M-1 | Exception text rendered to the browser | **Fixed.** Generic sentence on the page, detail to the log. |
+| M-2 | No rate limiting; single-threaded | **Accepted.** External access is blocked, the token is IP-bound, and H-1 will narrow the population further. |
+| L-1 | No security response headers | **Fixed.** CSP, nosniff, frame-deny, referrer policy. |
+| L-2 | CSV formula injection | **Fixed**, round-trip safe. |
+| L-3 | Logs grew without bound | **Fixed.** Rotates at 5 MB, one generation kept. |
+| L-4 | `-Anonymous` served the network with only a warning | **Fixed.** Refused unless `-AllowAnonymousOnNetwork` is also given. |
+
+**H-2 is the one still worth acting on, and it is worse than first written.**
+The folder's ACL grants `NT AUTHORITY\Authenticated Users: Modify` — inherited
+from the root of `C:\`, which hands that down to anything created there. That
+is not only read access to a live API key; it is **write access to a script
+SYSTEM executes at every boot**. Creating the folder outside a user profile was
+right; the drive root is the trap. Fix by breaking inheritance and granting
+only SYSTEM and Administrators, on `C:\Solutions` and below — the parent
+matters too, since delete rights there would let someone replace the child
+folder whatever its own ACL says.
+
+**On CSP:** the policy allows exactly one inline script, by hash —
+`'unsafe-hashes'` plus the SHA-256 of `window.print()`, which is the sheet's
+print button. An inline event handler cannot be allowed by hash without
+`'unsafe-hashes'`. If that handler's text ever changes, the hash must change
+with it or the button silently stops working.
+
+**On CSV escaping:** `ConvertTo-CsvSafeText` prefixes an apostrophe on write
+and `ConvertFrom-CsvSafeText` removes it on read. **The pair is the point** —
+escaping without the matching un-escape would silently stop every affected rule
+from matching the application it came from. Verified by round-trip: a rule
+stored as `'=cmd|calc!A1` still classifies an app named `=cmd|calc!A1`.
+
 **Known and deliberate gap: there is no authorization, only authentication.**
 Any domain account that can reach the port gets served; the caller's name is
 logged but never checked. In practice that is most of the organisation, and

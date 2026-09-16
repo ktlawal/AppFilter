@@ -71,6 +71,12 @@ param(
     # Turn off Windows authentication. Only sensible for a local trial.
     [switch]$Anonymous,
 
+    # Required to combine -Anonymous with a bind address other than
+    # localhost. Without it that combination is refused rather than warned
+    # about: it serves fleet inventory to anyone who can reach the port, and
+    # a warning printed into a log nobody reads is not a safeguard.
+    [switch]$AllowAnonymousOnNetwork,
+
     # Which Windows authentication scheme to offer.
     #
     #   IntegratedWindowsAuthentication  Negotiate, falling back to NTLM
@@ -259,6 +265,25 @@ function New-ErrorPage {
 }
 
 
+function Limit-LogSize {
+    <#
+        Rolls the log once past a size cap, keeping one previous generation.
+
+        This machine is meant to run for months without a restart, so rotating
+        only at startup would not bound anything. A file stat per request is
+        nothing at this volume.
+    #>
+    param([string]$Path, [int]$MaxBytes = 5MB)
+    try {
+        $item = Get-Item -Path $Path -ErrorAction Stop
+        if ($item.Length -lt $MaxBytes) { return }
+        $previous = "$Path.1"
+        if (Test-Path $previous) { Remove-Item $previous -Force -ErrorAction Stop }
+        Rename-Item -Path $Path -NewName (Split-Path $previous -Leaf) -ErrorAction Stop
+    }
+    catch { }   # A log that cannot be rotated must not stop the server.
+}
+
 function Write-ServerLog {
     <#
         Lifecycle events - started, failed to start, stopped - into the same
@@ -271,6 +296,7 @@ function Write-ServerLog {
     #>
     param([string]$Message)
     $line = '{0}  {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+    Limit-LogSize -Path $LogPath
     try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 -ErrorAction Stop }
     catch { Write-Warning "Could not write to $LogPath - $($_.Exception.Message)" }
 }
@@ -287,6 +313,7 @@ function Write-RequestLog {
     $line = '{0}  {1,-28} {2,-16} {3}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),
                                           $User, $Serial, $Outcome
     Write-Host $line
+    Limit-LogSize -Path $LogPath
     try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 -ErrorAction Stop }
     catch { Write-Warning "Could not write to $LogPath - $($_.Exception.Message)" }
 }
@@ -295,6 +322,19 @@ function Write-RequestLog {
 # ------------------------------------------------------------------
 #  Fail on configuration before opening a port
 # ------------------------------------------------------------------
+if ($Anonymous -and $BindAddress -notin @('localhost', '127.0.0.1', '::1') -and
+    -not $AllowAnonymousOnNetwork) {
+    Write-Host ""
+    Write-Host "Refusing to start." -ForegroundColor Red
+    Write-Host "  -Anonymous with -BindAddress '$BindAddress' would serve device inventory" -ForegroundColor Yellow
+    Write-Host "  to anyone who can reach port $Port, with no sign-in at all." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  For a local trial:   -Anonymous -BindAddress localhost" -ForegroundColor Yellow
+    Write-Host "  If you truly meant it: add -AllowAnonymousOnNetwork" -ForegroundColor Yellow
+    Write-Host ""
+    exit 1
+}
+
 $rules      = Import-AppRule -Path $RulesCsv
 $credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey
 
@@ -413,8 +453,9 @@ Write-Host "  Log           $LogPath"
 Write-Host "  Stop with Ctrl+C"
 Write-Host ""
 
-if ($Anonymous -and $BindAddress -eq '+') {
-    Write-Warning "Anonymous access on every interface: anyone who can reach this port can read fleet inventory."
+if ($Anonymous -and $BindAddress -notin @('localhost', '127.0.0.1', '::1')) {
+    Write-Warning "Anonymous access on a network address: anyone who can reach this port can read fleet inventory."
+    Write-ServerLog "WARNING  serving anonymously on $BindAddress - no sign-in required"
 }
 
 Write-ServerLog ("STARTED  {0}://{1}:{2}{3}  auth={4}  credential={5}  rules={6}  pid={7}" -f
@@ -508,14 +549,33 @@ try {
         }
         catch {
             # One bad request must not take the server down with it.
+            #
+            # The detail goes to the log, not to the page. An exception
+            # message can carry file paths, the API's own error body and hints
+            # about the tenant, and the person reading it may have no business
+            # with any of that.
             $status = 500
-            $body = New-ErrorPage -Title 'Lookup failed' -Detail $_.Exception.Message
             Write-RequestLog -User $user -Serial '-' -Outcome "ERROR $($_.Exception.Message)"
+            $body = New-ErrorPage -Title 'Lookup failed' `
+                        -Detail 'Something went wrong handling that request. The details are in the server log.'
         }
 
         try {
             $bytes = [Text.Encoding]::UTF8.GetBytes($body)
             $context.Response.StatusCode = $status
+
+            # The pages carry no external resources and no script beyond the
+            # print button, so the policy can be close to nothing-allowed.
+            # 'unsafe-hashes' plus the hash of window.print() permits that one
+            # inline handler and no other script - an inline event handler
+            # cannot be allowed by hash without it.
+            $context.Response.AddHeader('Content-Security-Policy',
+                "default-src 'none'; style-src 'unsafe-inline'; " +
+                "script-src 'unsafe-hashes' 'sha256-MguIPR6qNR8D3B+eAlK+bIRTZe8t3wkOY4B/56Me9FU='; " +
+                "img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+            $context.Response.AddHeader('X-Content-Type-Options', 'nosniff')
+            $context.Response.AddHeader('X-Frame-Options', 'DENY')
+            $context.Response.AddHeader('Referrer-Policy', 'no-referrer')
             if (-not $context.Response.ContentType) {
                 $context.Response.ContentType = 'text/html; charset=utf-8'
             }
