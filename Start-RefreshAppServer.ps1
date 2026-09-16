@@ -132,15 +132,15 @@ $PageCss = @'
      and pushed to the inner edge, so on a wide monitor the two halves read as
      one composition across the divider instead of drifting to opposite walls.
      The text inside stays left-aligned; only the block moves. */
-  .left { background: #e22254; color: #fff; padding: 46px 56px 46px 40px;
+  .left { background: #22254e; color: #fff; padding: 46px 56px 46px 40px;
           display: flex; flex-direction: column; justify-content: center;
           align-items: flex-end; }
   .left .inner { max-width: 34ch; }
   .mark { font-size: 12px; font-weight: 600; letter-spacing: .14em;
-          text-transform: uppercase; color: #fff; }
+          text-transform: uppercase; color: #8ea2e8; }
   .left h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em;
              line-height: 1.25; margin: 16px 0 0; }
-  .left p { color: #fff; font-size: 14px; line-height: 1.6; margin: 14px 0 0; }
+  .left p { color: #a9b2d6; font-size: 14px; line-height: 1.6; margin: 14px 0 0; }
 
   /* Right: the one thing to do. */
   /* place-items: center start - vertically centred, held against the divider. */
@@ -160,14 +160,12 @@ $PageCss = @'
                      outline: none; background: #fcfcfd; color: #101828;
                      transition: border-color .15s, background .15s; }
   input[type=text]::placeholder { color: #cdd2db; }
-  input[type=text]:focus { border-color: #e22254; background: #fff; }
+  input[type=text]:focus { border-color: #22254e; background: #fff; }
   button { width: 100%; margin-top: 16px; font: inherit; font-size: 15px; font-weight: 600;
-           color: #fff; background: #e22254; border: 0; border-radius: 10px;
+           color: #fff; background: #22254e; border: 0; border-radius: 10px;
            padding: 13px; cursor: pointer; transition: background .15s; }
-  button:hover { background: #c41a47; }
-  /* Dark outline, not the accent - a crimson ring on a crimson button is
-     invisible, and this is the only focus indicator a keyboard user gets. */
-  button:focus-visible { outline: 2px solid #101828; outline-offset: 2px; }
+  button:hover { background: #343872; }
+  button:focus-visible { outline: 2px solid #22254e; outline-offset: 2px; }
 
   .err { margin: 0 0 22px; padding: 12px 14px; border: 1px solid #f3b7b2;
          border-left-width: 3px; border-radius: 8px; background: #fef4f3;
