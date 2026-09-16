@@ -350,26 +350,59 @@ later touches `Import-AppRule` and nothing else.
 
 ## Current state
 
-The logic now lives in `AppFilter.psm1` and there are two front ends over it:
-the console script and `Start-RefreshAppServer.ps1`. Both were exercised
-against a mocked API and agree exactly — 5 install candidates of 15 on the
-same fixture, and an unmatched serial gives a clean "no device matched" on
-both. `Test-AppFilter.ps1` passes all 76 cases, twelve of which pin the API
-envelope shapes so the StrictMode and empty-page failures above cannot come
-back without the network.
+**In production.** The web front end runs under a scheduled task as
+`NT AUTHORITY\SYSTEM` on the lab machine, starts at boot, survived a real
+reboot, and serves over https at
+`https://<machine-fqdn>:5000/appfilter/`. Technicians sign in silently via
+Kerberos; every lookup is logged against their domain account. Real lookups
+against live devices return sensible counts (`6 to install of 71`,
+`16 to install of 72`).
 
-**A serial that is not found may still be in Absolute under a suffixed name.**
-The tenant appends `_Moved` to the `serialNumber` of some devices — two of the
-first five returned by an unfiltered query had it. Exact-match lookup misses
-those, so a technician typing a serial off a sticker can get "no device
-matched" for a device that is there. Unconfirmed whether `_Moved` is a
-convention or coincidence; if it is a convention, the tool should retry on a
-partial match and offer the near match rather than giving up. Not built.
+### The eight files
 
-The baseline has been rebuilt from real base-image devices. It has **not**
-been re-run against a live serial since — the last real run predates all of this (serial `4QXTTHR3`:
-75 apps, 58 excluded, 17 install candidates), so expect that count to move,
-probably upward.
+| File | What it is | Holds the API key? |
+|---|---|---|
+| `AppFilter.psm1` | **The engine.** Classifier, Absolute API client, HTML generation, rule read/write. Both front ends import it. Put new behaviour here. | **No** — takes the credential as a parameter |
+| `Start-RefreshAppServer.ps1` | **The web front end**, and the one that matters day to day. Runs under the startup task. | **Yes** |
+| `Get-RefreshAppList.ps1` | Console front end. Same classifier, plus the curation prompt, which is console-only. | **Yes** |
+| `AppRules.csv` | Every suppression rule: 81 name, 12 publisher, 14 pattern. Editing rules is a data change, not a code change. | No |
+| `Test-AppFilter.ps1` | 79 cases: normalizers, classification against two real inventories, API envelope shapes, HTML escaping. Needs no credential and no network. **Run it after touching a normalizer or the rules file.** | No |
+| `Debug-AbsoluteLookup.ps1` | Run when a lookup says "no device matched" for a device you believe exists. Separates a wrong-tenant token, a token that cannot read devices, and a serial that is genuinely gone. | **Yes** |
+| `Find-ServerCertificate.ps1` | Read-only. Finds a certificate that can serve https, says whether it chains, and prints the binding command. | No |
+| `HANDOFF.md` | This file. | No |
+
+**Three files carry the key** — the two front ends and the lookup diagnostic.
+That is the list to have in mind before sharing anything. The module, which is
+the largest file and the one most likely to be copied for reference, carries
+none.
+
+### What is live on the lab machine
+
+- Scheduled task **Refresh App List**, at startup, as SYSTEM, execution time
+  limit disabled, restart on failure
+- URL reservation `https://+:5000/appfilter/` for `NT AUTHORITY\SYSTEM`
+- Certificate bound to `0.0.0.0:5000` from the enterprise CA
+- Inbound firewall rule, TCP 5000, Domain profile only
+- Absolute token restricted to approved egress IPs
+
+### What is deliberately not done
+
+- **Authorization.** Any domain account that reaches the port is served. An
+  `-AllowedGroup` check is scoped and agreed but awaiting a decision on which
+  AD group. See the security audit section.
+- **The `_Moved` serial suffix.** The tenant appends `_Moved` to some devices'
+  `serialNumber`, so a technician typing a serial off a sticker can get "no
+  device matched" for a device that is there. Whether that is a convention or
+  coincidence is unconfirmed. If it is a convention, the tool should retry on
+  a partial match and offer the near match. Not built.
+
+### What will break, and when
+
+- **The certificate renews around Dec 2026.** The http.sys binding pins a
+  thumbprint, so https stops working the day it rolls — silently, with nothing
+  on the machine having changed. Re-run `netsh http add sslcert` with the new
+  thumbprint. This is the single most likely future outage.
+- **The API token expires Jan 7, 2027.**
 
 ## Rule provenance
 
@@ -784,24 +817,13 @@ Subject**, which is normal for an enterprise template. `GetNameInfo('SimpleName'
 returns nothing for such a certificate, so the chain display falls through to
 the SAN and then the raw subject.
 
-### Where this got to
+### Still unverified
 
-Steps 1-4 are done on the real machine. Confirmed working there: the inbound
-firewall rule (port filter attached, adapter `DomainAuthenticated`), the URL
-reservation with `Listen: Yes`, the listener itself, and Windows
-authentication — `Invoke-WebRequest -UseDefaultCredentials` returned 200 over
-both `localhost` and the machine's own hostname, and a browser signed in via
-the IP. The live API path is proven too: a real one-page response was read
-correctly, and `Get-NextPageToken` pulled a real continuation token out of a
-real envelope.
-
-**Next: step 5, the startup task**, run as `NT AUTHORITY\SYSTEM` — which is
-also the expected fix for the SPN problem above.
-
-**Still unverified:** a lookup from a second machine by a second person.
-Every real lookup so far has been from the lab machine under one account, so
-the case that actually matters to the attribution story — a technician at
-their own desk, their name in the log — has not been exercised.
+**A lookup from a second machine, by a second person.** Every real lookup so
+far has been from the lab machine under one account. The case that actually
+matters to the attribution story — a technician at their own desk, their name
+in the log — has not been exercised. It is the last claim in this document
+that rests on reasoning rather than evidence.
 
 ### Security audit, 16 Sep 2026
 
