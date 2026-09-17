@@ -503,10 +503,9 @@ somewhere specific — relative and absolute paths both work, missing directorie
 are created, a missing `.html` extension is added — and `-NoSheet` turns it off
 for a console-only run.
 
-The sheet is a one-page worksheet: a **Print this sheet** button at the top,
-then device identity, the install list as a tick-box table with a Notes column,
-and a footer giving the install count and how many applications were
-suppressed. A non-active agent or a scan older than 30 days appears as a boxed
+The sheet is a one-page worksheet: a **Download** button at the top, then
+device identity, the install list as a tick-box table with a Notes column, and
+a footer giving the install count and how many applications were suppressed. A non-active agent or a scan older than 30 days appears as a boxed
 warning on the sheet itself, not just in the console.
 
 The footer's total is computed, not trusted: it is raised to at least what
@@ -527,10 +526,33 @@ ends pass it. Reasons render in a fixed order (Base image, Driver / OEM,
 Runtime / component) with anything unexpected after them, so a new reason
 string shows up rather than disappearing.
 
-Open it, click Print. The button calls `window.print()`; it and the rest of the
-screen-only furniture (grey backdrop, card padding, drop shadow) are hidden
-under `@media print`, so what reaches the paper is just the sheet. Verified by
-forcing the print block to apply on screen and rendering it.
+**There is no print button.** Printing was withdrawn on cost grounds, so the
+toolbar offers **Download** instead: `/download?serial=X` re-runs the lookup and
+returns a PDF attachment. Ctrl+P still works - a page cannot and should not try
+to block it - but nothing invites it. The `@media print` rules stay, so anyone
+who does print still gets the sheet without the screen furniture.
+
+Bringing the button back is the toolbar block in `New-InstallSheetHtml` plus the
+CSP hash the server used to carry: `'unsafe-hashes'` and the SHA-256 of
+`window.print()`. With the handler gone, `script-src` is now `'none'` outright.
+
+**The PDF is written by hand** - `New-InstallSheetPdf`, about 250 lines: a
+catalogue, a page tree, two standard Type1 fonts (nothing embedded) and one
+uncompressed content stream per page. That is deliberate. This project used to
+render PDFs by driving Edge or Chrome headless, and that came out because it
+meant a subprocess per request, a browser dependency on a machine whose listener
+runs as SYSTEM, and a profile directory to clean up. The hand-written path has
+no dependency and leaves nothing running. Uncompressed streams cost a few KB and
+make the output greppable, which is how the tests check it.
+
+Three things in that code are load-bearing. **Byte offsets in the xref table
+must be exact**, so the file is assembled into a MemoryStream with each object's
+offset recorded as it is written, and a test walks every offset back to the
+object it claims. **`-f` binds tighter than `+`**, so a format string split
+across a concatenation formats only its second half - which left `{0}` sitting
+in the page dictionary as literal text and produced a PDF that opened but had no
+MediaBox. **Text is WinAnsi**; parentheses and backslashes are escaped, or a
+name like `7-Zip (x64)` ends the PDF string early.
 
 This used to render a PDF by driving Edge or Chrome headless. That is gone —
 along with `Find-PdfBrowser`, `APPFILTER_BROWSER`, the throwaway profile
@@ -556,7 +578,8 @@ Routes, all under `-BasePath` (default `/appfilter/`):
 | Route | Returns |
 |---|---|
 | `/appfilter/` | the serial form |
-| `/appfilter/lookup?serial=X` | the printable sheet, with a "look up another device" link |
+| `/appfilter/lookup?serial=X` | the sheet, with a Download button and a "look up another device" link |
+| `/appfilter/download?serial=X` | the same sheet as a PDF attachment, `<serial>-InstallList.pdf` |
 | `/appfilter/health` | `OK`, for a monitor or a scheduled restart check |
 
 **Why a path and not just a port.** http.sys routes by longest prefix match,
@@ -889,11 +912,13 @@ technician can log in and read it, that property is weakened through the login
 path rather than the distribution path. Narrowing RDP, not ACLs, is what would
 restore it — a conversation for the supervisor, alongside H-1.
 
-**On CSP:** the policy allows exactly one inline script, by hash —
-`'unsafe-hashes'` plus the SHA-256 of `window.print()`, which is the sheet's
-print button. An inline event handler cannot be allowed by hash without
-`'unsafe-hashes'`. If that handler's text ever changes, the hash must change
-with it or the button silently stops working.
+**On CSP:** the policy now allows no script at all — `script-src 'none'`. It
+used to allow exactly one inline handler by hash, `'unsafe-hashes'` plus the
+SHA-256 of `window.print()`, which was the sheet's print button; that button is
+gone and the exception went with it. If printing ever returns, so does the pair
+— and note that an inline event handler cannot be allowed by hash *without*
+`'unsafe-hashes'`, and that the hash must be recomputed if the handler's text
+changes by so much as a space.
 
 **On CSV escaping:** `ConvertTo-CsvSafeText` prefixes an apostrophe on write
 and `ConvertFrom-CsvSafeText` removes it on read. **The pair is the point** —

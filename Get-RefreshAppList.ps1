@@ -248,7 +248,7 @@ if (-not $NoSheet) {
     $written = Save-InstallSheet -Html $html -Path $sheetPath
     if ($written) {
         Write-Host "Printable sheet saved to $written" -ForegroundColor Green
-        Write-Host "  Open it and click Print." -ForegroundColor DarkGray
+        Write-Host "  Open it in a browser." -ForegroundColor DarkGray
     }
 }
 

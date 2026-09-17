@@ -243,7 +243,7 @@ function New-FormPage {
 $errHtml      <form method="get" action="${BasePath}lookup">
         <label for="serial">Serial number</label>
         <input type="text" id="serial" name="serial" autofocus autocomplete="off"
-               spellcheck="false" value="$(ConvertTo-HtmlText $Serial)" />
+               spellcheck="false" placeholder="SN" value="$(ConvertTo-HtmlText $Serial)" />
         <button type="submit">Look up</button>
       </form>
       <p class="foot">$who</p>
@@ -488,8 +488,9 @@ try {
             $path = $path.Substring($basePrefix.Length)
         }
         if (-not $path.StartsWith('/')) { $path = '/' + $path }
-        $body    = $null
-        $status  = 200
+        $body      = $null
+        $bodyBytes = $null      # set instead of $body for a non-text response
+        $status    = 200
 
         try {
             switch -Regex ($path) {
@@ -531,9 +532,52 @@ try {
                     $body = New-InstallSheetHtml -Device $result.Device -Apps $result.ToInstall `
                                 -ScanAge $result.ScanAge -SuppressedCount $result.Excluded.Count `
                                 -Suppressed $result.Excluded `
-                                -TotalCount $result.Apps.Count -HomeLink $BasePath
+                                -TotalCount $result.Apps.Count -HomeLink $BasePath `
+                                -DownloadLink ("{0}download?serial={1}" -f $BasePath, [Uri]::EscapeDataString($serial))
                     Write-RequestLog -User $user -Serial $serial `
                         -Outcome "$($result.ToInstall.Count) to install of $($result.Apps.Count)"
+                    break
+                }
+
+                '^/download/?$' {
+                    # The same lookup again rather than cached state: the
+                    # server keeps nothing between requests, and a second call
+                    # to Absolute costs a couple of seconds against the risk of
+                    # handing someone a stale sheet. It also puts the download
+                    # in the log under the technician's own name.
+                    $serial = [string]$context.Request.QueryString['serial']
+                    $serial = $serial.Trim()
+
+                    if ($serial -notmatch '^[A-Za-z0-9\-]{1,32}$') {
+                        $status = 400
+                        $body = New-FormPage -User $user -Serial $serial `
+                                    -Error "That does not look like a serial number. Letters, digits and hyphens only."
+                        Write-RequestLog -User $user -Serial $serial -Outcome 'rejected (bad serial)'
+                        break
+                    }
+
+                    $result = Get-RefreshApps -Serial $serial -Rules $rules -Credential $credential `
+                                              -BaseUrl $BaseUrl -PageSize $PageSize
+
+                    if (-not $result.Found -or $result.Apps.Count -eq 0) {
+                        $status = 404
+                        $body = New-FormPage -User $user -Serial $serial -Error $result.Message
+                        Write-RequestLog -User $user -Serial $serial -Outcome 'download: nothing to send'
+                        break
+                    }
+
+                    $bodyBytes = New-InstallSheetPdf -Device $result.Device -Apps $result.ToInstall `
+                                     -ScanAge $result.ScanAge -SuppressedCount $result.Excluded.Count `
+                                     -TotalCount $result.Apps.Count
+
+                    # The filename is built from the serial, which has already
+                    # been validated down to letters, digits and hyphens - so
+                    # there is nothing in it that could break out of the header.
+                    $context.Response.ContentType = 'application/pdf'
+                    $context.Response.AddHeader('Content-Disposition',
+                        ('attachment; filename="{0}-InstallList.pdf"' -f $result.Device.serialNumber))
+                    Write-RequestLog -User $user -Serial $serial `
+                        -Outcome "downloaded $($result.ToInstall.Count) to install of $($result.Apps.Count)"
                     break
                 }
 
@@ -562,17 +606,17 @@ try {
         }
 
         try {
-            $bytes = [Text.Encoding]::UTF8.GetBytes($body)
+            $bytes = if ($null -ne $bodyBytes) { $bodyBytes }
+                     else { [Text.Encoding]::UTF8.GetBytes($body) }
             $context.Response.StatusCode = $status
 
-            # The pages carry no external resources and no script beyond the
-            # print button, so the policy can be close to nothing-allowed.
-            # 'unsafe-hashes' plus the hash of window.print() permits that one
-            # inline handler and no other script - an inline event handler
-            # cannot be allowed by hash without it.
+            # The pages carry no external resources and, since the print button
+            # became a download link, no script at all - so script-src is now
+            # 'none' outright. It used to be 'unsafe-hashes' plus the SHA-256 of
+            # window.print(), the one inline handler; that pair comes back
+            # together with the button if printing ever returns.
             $context.Response.AddHeader('Content-Security-Policy',
-                "default-src 'none'; style-src 'unsafe-inline'; " +
-                "script-src 'unsafe-hashes' 'sha256-MguIPR6qNR8D3B+eAlK+bIRTZe8t3wkOY4B/56Me9FU='; " +
+                "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; " +
                 "img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
             $context.Response.AddHeader('X-Content-Type-Options', 'nosniff')
             $context.Response.AddHeader('X-Frame-Options', 'DENY')
