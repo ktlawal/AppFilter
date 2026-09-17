@@ -243,7 +243,7 @@ function New-FormPage {
 $errHtml      <form method="get" action="${BasePath}lookup">
         <label for="serial">Serial number</label>
         <input type="text" id="serial" name="serial" autofocus autocomplete="off"
-               spellcheck="false" placeholder="SN" value="$(ConvertTo-HtmlText $Serial)" />
+               spellcheck="false" placeholder="ABC1234" value="$(ConvertTo-HtmlText $Serial)" />
         <button type="submit">Look up</button>
       </form>
       <p class="foot">$who</p>

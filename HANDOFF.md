@@ -366,7 +366,7 @@ against live devices return sensible counts (`6 to install of 71`,
 | `Start-RefreshAppServer.ps1` | **The web front end**, and the one that matters day to day. Runs under the startup task. | **Yes** |
 | `Get-RefreshAppList.ps1` | Console front end. Same classifier, plus the curation prompt, which is console-only. | **Yes** |
 | `AppRules.csv` | Every suppression rule: 82 name, 12 publisher, 14 pattern. Editing rules is a data change, not a code change. | No |
-| `Test-AppFilter.ps1` | 94 cases: normalizers, classification against two real inventories, API envelope shapes, HTML escaping, the sheet's suppressed list. Needs no credential and no network. **Run it after touching a normalizer or the rules file.** | No |
+| `Test-AppFilter.ps1` | 99 cases: normalizers, classification against two real inventories, API envelope shapes, HTML escaping, the sheet's suppressed list and toolbar. Needs no credential and no network. **Run it after touching a normalizer or the rules file.** | No |
 | `Debug-AbsoluteLookup.ps1` | Run when a lookup says "no device matched" for a device you believe exists. Separates a wrong-tenant token, a token that cannot read devices, and a serial that is genuinely gone. | **Yes** |
 | `Find-ServerCertificate.ps1` | Read-only. Finds a certificate that can serve https, says whether it chains, and prints the binding command. | No |
 | `Application-List-Technician-Guide.docx` | Two-page how-to for technicians, for the SharePoint library. **The URL in it is a placeholder** — replace `https://<lab-machine>.<domain>:5000/appfilter/` and the contact line before publishing. | No |
@@ -852,6 +852,22 @@ The leaf certificate there carries its name **only in the SAN, with an empty
 Subject**, which is normal for an enterprise template. `GetNameInfo('SimpleName')`
 returns nothing for such a certificate, so the chain display falls through to
 the SAN and then the raw subject.
+
+### Running the tests without Windows
+
+**A Linux sandbox can run all of this.** PowerShell 7 unpacks from the
+`powershell-7.x-linux-x64.tar.gz` release tarball into a directory and runs
+from there - no install, no root beyond writing the directory. That is enough
+to execute `Test-AppFilter.ps1`, render any page or sheet the module produces,
+and parse both front ends. Chromium plus Playwright then screenshots the
+rendered HTML, including `emulateMedia({media:'print'})` to prove what does and
+does not reach the paper.
+
+**What it cannot tell you** is anything version-specific: PowerShell 7 answers
+`.Count` on a scalar, so the `$null` that produced "1 of 0" does not reproduce
+there. Windows PowerShell 5.1 remains the only place those behave differently -
+write for 5.1, verify what you can on 7, and keep the 5.1-only gotchas above in
+mind rather than trusting a green run.
 
 ### Still unverified
 
