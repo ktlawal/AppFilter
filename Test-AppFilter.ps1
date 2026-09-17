@@ -264,12 +264,6 @@ Assert-Envelope 'no raw script tag'     ($sheet -match '<script>')              
 Assert-Envelope 'print handler exact'   ($sheet -match 'onclick="window\.print\(\)">Print this sheet</button>') 'True'
 Assert-Envelope 'Ctrl+P hint'           ($sheet -match 'or press Ctrl\+P')                         'True'
 Assert-Envelope 'back link kept'        ($sheet -match 'look up another device')                   'True'
-# A download button appears only when the caller asks for one. The server does
-# not today; the route behind it still exists.
-Assert-Envelope 'no download by default' ($sheet -match '>Download</a>')                           'False'
-$shDl = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 1 -SuppressedCount 0 -TotalCount 1 `
-            -DownloadLink '/appfilter/download?serial=ABC1234'
-Assert-Envelope 'download when asked'   ($shDl -match '<a class="action" href="[^"]*download\?serial=ABC1234">Download</a>') 'True'
 # A sheet saved to disk still gets its print button, with no links beside it.
 $shNoTools = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 1 -SuppressedCount 0 -TotalCount 1
 Assert-Envelope 'saved sheet prints'    ($shNoTools -match 'Print this sheet')                     'True'
@@ -294,68 +288,6 @@ $shPlain = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 2 `
                -SuppressedCount 4 -TotalCount 5
 Assert-Envelope 'no list, no details'   ($shPlain -match '<details')                              'False'
 Assert-Envelope 'footer count stands'   ($shPlain -match '4 of 5 inventoried applications')       'True'
-
-Write-Host "`nDownloadable PDF (kept, not linked from the sheet)" -ForegroundColor Cyan
-# Written by hand, so the parts a reader will reject are worth asserting: the
-# header, the terminator, a cross-reference table, and the page tree agreeing
-# with the number of pages actually emitted. The content stream is left
-# uncompressed, which is what makes the text greppable here.
-$pdfBytes = New-InstallSheetPdf -Device $shDevice -Apps $shApps -ScanAge 2 `
-                -SuppressedCount 4 -TotalCount 5
-$pdfText  = [System.Text.Encoding]::GetEncoding(1252).GetString($pdfBytes)
-
-Assert-Envelope 'returns bytes'         ($pdfBytes -is [byte[]])                       'True'
-Assert-Envelope 'PDF header'            ($pdfText.StartsWith('%PDF-1.4'))              'True'
-Assert-Envelope 'PDF terminator'        ($pdfText.TrimEnd().EndsWith('%%EOF'))         'True'
-Assert-Envelope 'has xref'              ($pdfText -match "(?m)^xref$")                 'True'
-Assert-Envelope 'has startxref'         ($pdfText -match "(?m)^startxref$")            'True'
-Assert-Envelope 'A4 media box'          ($pdfText -match '/MediaBox \[0 0 595 842\]')  'True'
-# The MediaBox is the one that catches a -f binding to half a concatenation.
-Assert-Envelope 'no unformatted braces' ($pdfText -match '\{\d')                       'False'
-Assert-Envelope 'one page'              ($pdfText -match '/Count 1')                   'True'
-Assert-Envelope 'app name in stream'    ($pdfText -match 'Bluebeam Revu')              'True'
-Assert-Envelope 'footer count'          ($pdfText -match '1 to install - 4 of 5')      'True'
-
-# Every xref offset has to land on the object it claims, or a reader seeking by
-# offset reads garbage. Check each one against the file itself.
-$xrefOk = $true
-$xrefAt = $pdfText.LastIndexOf('startxref')
-$startAt = [int](($pdfText.Substring($xrefAt) -split "`n")[1].Trim())
-$entries = @(($pdfText.Substring($startAt) -split "`n") | Where-Object { $_ -match '^\d{10} \d{5} n' })
-for ($e = 0; $e -lt $entries.Count; $e++) {
-    $off = [int]$entries[$e].Substring(0, 10)
-    if (-not $pdfText.Substring($off).StartsWith("$($e + 1) 0 obj")) { $xrefOk = $false }
-}
-Assert-Envelope 'xref offsets land'     $xrefOk                                        'True'
-Assert-Envelope 'xref entry count'      $entries.Count                                 6
-
-# Long values are truncated rather than left to run into the next column.
-$long = @([pscustomobject]@{ AppName = ('X' * 200); Version = '1.0'; Publisher = 'Y' })
-$pdfLong = [System.Text.Encoding]::GetEncoding(1252).GetString(
-               (New-InstallSheetPdf -Device $shDevice -Apps $long -ScanAge 1 -SuppressedCount 0 -TotalCount 1))
-Assert-Envelope 'long name truncated'   ($pdfLong -match ('X{200}'))                   'False'
-Assert-Envelope 'truncation marked'     ($pdfLong -match 'X+\.\.\.')                   'True'
-
-# Parentheses and backslashes end a PDF string early if they are not escaped.
-$tricky = @([pscustomobject]@{ AppName = 'Thing (x64) \ test'; Version = '1'; Publisher = 'p' })
-$pdfTricky = [System.Text.Encoding]::GetEncoding(1252).GetString(
-                 (New-InstallSheetPdf -Device $shDevice -Apps $tricky -ScanAge 1 -SuppressedCount 0 -TotalCount 1))
-Assert-Envelope 'parens escaped'        ($pdfTricky -match 'Thing \\\(x64\\\)')        'True'
-Assert-Envelope 'backslash escaped'     ($pdfTricky -match '\\\\ test')                'True'
-
-# Sixty rows do not fit on one page, and the page tree has to say so.
-$many = @(1..60 | ForEach-Object { [pscustomobject]@{ AppName = "App $_"; Version = "1.$_"; Publisher = 'v' } })
-$pdfMany = [System.Text.Encoding]::GetEncoding(1252).GetString(
-               (New-InstallSheetPdf -Device $shDevice -Apps $many -ScanAge 1 -SuppressedCount 0 -TotalCount 60))
-Assert-Envelope 'paginates'             ($pdfMany -match '/Count 2')                   'True'
-Assert-Envelope 'page numbering'        ($pdfMany -match 'Page 2 of 2')                'True'
-
-# An empty install list is a real answer and still produces a valid sheet.
-$pdfNone = [System.Text.Encoding]::GetEncoding(1252).GetString(
-               (New-InstallSheetPdf -Device $shDevice -Apps @() -ScanAge $null -SuppressedCount 1 -TotalCount 0))
-Assert-Envelope 'empty list renders'    ($pdfNone -match 'Nothing beyond the base image') 'True'
-Assert-Envelope 'empty list total'      ($pdfNone -match '0 to install - 1 of 1')      'True'
-
 Write-Host ""
 if ($failures -eq 0) { Write-Host "All cases passed." -ForegroundColor Green }
 else { Write-Host "$failures case(s) failed." -ForegroundColor Red; exit 1 }

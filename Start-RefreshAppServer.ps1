@@ -488,9 +488,8 @@ try {
             $path = $path.Substring($basePrefix.Length)
         }
         if (-not $path.StartsWith('/')) { $path = '/' + $path }
-        $body      = $null
-        $bodyBytes = $null      # set instead of $body for a non-text response
-        $status    = 200
+        $body    = $null
+        $status  = 200
 
         try {
             switch -Regex ($path) {
@@ -538,53 +537,6 @@ try {
                     break
                 }
 
-                '^/download/?$' {
-                    # Still served, but no longer linked from the sheet: the
-                    # print button came back and the Download button went with
-                    # it. Linking it again is one argument on the
-                    # New-InstallSheetHtml call above.
-                    #
-                    # The same lookup again rather than cached state: the
-                    # server keeps nothing between requests, and a second call
-                    # to Absolute costs a couple of seconds against the risk of
-                    # handing someone a stale sheet. It also puts the download
-                    # in the log under the technician's own name.
-                    $serial = [string]$context.Request.QueryString['serial']
-                    $serial = $serial.Trim()
-
-                    if ($serial -notmatch '^[A-Za-z0-9\-]{1,32}$') {
-                        $status = 400
-                        $body = New-FormPage -User $user -Serial $serial `
-                                    -Error "That does not look like a serial number. Letters, digits and hyphens only."
-                        Write-RequestLog -User $user -Serial $serial -Outcome 'rejected (bad serial)'
-                        break
-                    }
-
-                    $result = Get-RefreshApps -Serial $serial -Rules $rules -Credential $credential `
-                                              -BaseUrl $BaseUrl -PageSize $PageSize
-
-                    if (-not $result.Found -or $result.Apps.Count -eq 0) {
-                        $status = 404
-                        $body = New-FormPage -User $user -Serial $serial -Error $result.Message
-                        Write-RequestLog -User $user -Serial $serial -Outcome 'download: nothing to send'
-                        break
-                    }
-
-                    $bodyBytes = New-InstallSheetPdf -Device $result.Device -Apps $result.ToInstall `
-                                     -ScanAge $result.ScanAge -SuppressedCount $result.Excluded.Count `
-                                     -TotalCount $result.Apps.Count
-
-                    # The filename is built from the serial, which has already
-                    # been validated down to letters, digits and hyphens - so
-                    # there is nothing in it that could break out of the header.
-                    $context.Response.ContentType = 'application/pdf'
-                    $context.Response.AddHeader('Content-Disposition',
-                        ('attachment; filename="{0}-InstallList.pdf"' -f $result.Device.serialNumber))
-                    Write-RequestLog -User $user -Serial $serial `
-                        -Outcome "downloaded $($result.ToInstall.Count) to install of $($result.Apps.Count)"
-                    break
-                }
-
                 '^/?$' {
                     $body = New-FormPage -User $user
                     break
@@ -610,8 +562,7 @@ try {
         }
 
         try {
-            $bytes = if ($null -ne $bodyBytes) { $bodyBytes }
-                     else { [Text.Encoding]::UTF8.GetBytes($body) }
+            $bytes = [Text.Encoding]::UTF8.GetBytes($body)
             $context.Response.StatusCode = $status
 
             # The pages carry no external resources and one inline handler:

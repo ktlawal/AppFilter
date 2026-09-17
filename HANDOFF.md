@@ -516,7 +516,7 @@ one collection not wrapped in `@()`, a one-row `foreach` yields a scalar, and
 `.Count` on a scalar is `$null` in Windows PowerShell 5.1. The wrap is the
 fix; the clamp means the arithmetic cannot go wrong on the page again.
 
-Under that footer is a collapsed **Not on this list, and why** block: every
+Under that footer is a collapsed **Suppressed applications** block: every
 suppressed application with its version, grouped by the reason that caught it.
 It exists for one question — the user says they had X, it is not on the sheet,
 was it filtered out or was it never in the inventory? — which is why it is
@@ -531,36 +531,20 @@ Open it, click Print. The button calls `window.print()`; it and the rest of the
 screen-only furniture (grey backdrop, card padding, drop shadow) are hidden
 under `@media print`, so what reaches the paper is just the sheet.
 
-**Printing was withdrawn for a day and brought straight back**, so the shape of
-the change is worth knowing: the toolbar block in `New-InstallSheetHtml` decides
-which buttons exist, and the server's CSP has to match. A print button means
-`'unsafe-hashes'` plus the SHA-256 of `window.print()` in the policy; with no
-inline handler at all, `script-src` can be `'none'`. The two move together or
-the button silently stops working. A test pins the handler's exact text for
-that reason.
+**Printing was withdrawn for a day and brought straight back**, and a PDF
+download was built and then removed in the same week. The conclusion is worth
+keeping so nobody builds it a third time: **the browser's print dialogue already
+offers Save as PDF as a destination.** A technician who wants a file rather than
+paper picks it there. A server-side PDF writer, a `/download` route and a second
+API call per download all bought a capability the browser was already giving
+away. The code is at `e7b8baa` in the history if the reasoning ever changes.
 
-**The PDF download survives, unlinked.** `/download?serial=X` still re-runs the
-lookup and returns a PDF attachment; the sheet simply does not advertise it any
-more. Putting the button back is one `-DownloadLink` argument on the
-`New-InstallSheetHtml` call in the server.
-
-**The PDF is written by hand** - `New-InstallSheetPdf`, about 250 lines: a
-catalogue, a page tree, two standard Type1 fonts (nothing embedded) and one
-uncompressed content stream per page. That is deliberate. This project used to
-render PDFs by driving Edge or Chrome headless, and that came out because it
-meant a subprocess per request, a browser dependency on a machine whose listener
-runs as SYSTEM, and a profile directory to clean up. The hand-written path has
-no dependency and leaves nothing running. Uncompressed streams cost a few KB and
-make the output greppable, which is how the tests check it.
-
-Three things in that code are load-bearing. **Byte offsets in the xref table
-must be exact**, so the file is assembled into a MemoryStream with each object's
-offset recorded as it is written, and a test walks every offset back to the
-object it claims. **`-f` binds tighter than `+`**, so a format string split
-across a concatenation formats only its second half - which left `{0}` sitting
-in the page dictionary as literal text and produced a PDF that opened but had no
-MediaBox. **Text is WinAnsi**; parentheses and backslashes are escaped, or a
-name like `7-Zip (x64)` ends the PDF string early.
+What that episode did leave behind is a rule about the toolbar: **it and the
+CSP move together.** A print button means `'unsafe-hashes'` plus the SHA-256 of
+`window.print()` in the policy; with no inline handler at all, `script-src`
+could be `'none'`. Change one without the other and the button stops working
+with no error anywhere, so a test pins the handler's exact text and the hash was
+verified against the page the module actually emits.
 
 This used to render a PDF by driving Edge or Chrome headless. That is gone —
 along with `Find-PdfBrowser`, `APPFILTER_BROWSER`, the throwaway profile
@@ -586,8 +570,7 @@ Routes, all under `-BasePath` (default `/appfilter/`):
 | Route | Returns |
 |---|---|
 | `/appfilter/` | the serial form |
-| `/appfilter/lookup?serial=X` | the sheet, with a Print button and a "look up another device" link |
-| `/appfilter/download?serial=X` | the same sheet as a PDF attachment, `<serial>-InstallList.pdf`. **Served, but nothing links to it** |
+| `/appfilter/lookup?serial=X` | the printable sheet, with a "look up another device" link |
 | `/appfilter/health` | `OK`, for a monitor or a scheduled restart check |
 
 **Why a path and not just a port.** http.sys routes by longest prefix match,

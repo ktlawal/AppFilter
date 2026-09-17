@@ -511,309 +511,6 @@ function ConvertTo-HtmlText {
           Replace('"', '&quot;').Replace("'", '&#39;')
 }
 
-function ConvertTo-PdfText {
-    <#
-        Escapes a string for a PDF literal string: backslash, both parentheses,
-        and anything below 0x20 that would otherwise sit raw in the content
-        stream. Text is written in WinAnsi (code page 1252), which is what the
-        fonts declare, so a character outside it becomes '?' at encode time
-        rather than corrupting the stream.
-    #>
-    param([string]$Text)
-
-    if ($null -eq $Text) { return '' }
-    $t = $Text -replace '[\x00-\x1F]', ' '
-    return $t.Replace('\', '\\').Replace('(', '\(').Replace(')', '\)')
-}
-
-function Get-PdfTextWidth {
-    <#
-        Approximate width of a string in Helvetica, in points.
-
-        Deliberately approximate. Real Helvetica metrics are a 95-entry table
-        per font, and the only thing this width decides is where to truncate a
-        cell: a few points out moves a truncation by one character, while
-        having no width at all lets long names run into the next column.
-    #>
-    param([string]$Text, [double]$Size = 10)
-
-    if ([string]::IsNullOrEmpty($Text)) { return 0 }
-
-    $units = 0.0
-    foreach ($c in $Text.ToCharArray()) {
-        switch -Regex ([string]$c) {
-            '[ijlIt.,;:!|`''\[\]() ]' { $units += 0.28; break }
-            '[mwMW@]'                 { $units += 0.85; break }
-            '[A-Z]'                   { $units += 0.70; break }
-            '[0-9]'                   { $units += 0.56; break }
-            default                   { $units += 0.55 }
-        }
-    }
-    return $units * $Size
-}
-
-function Limit-PdfCell {
-    <#
-        Truncates to fit a column, with an ellipsis when it had to cut. A name
-        overrunning its column reads as a bug; a truncated one reads as a long
-        name.
-    #>
-    param([string]$Text, [double]$Width, [double]$Size = 10)
-
-    if ([string]::IsNullOrEmpty($Text)) { return '' }
-    if ((Get-PdfTextWidth $Text $Size) -le $Width) { return $Text }
-
-    $out = ''
-    foreach ($c in $Text.ToCharArray()) {
-        if ((Get-PdfTextWidth ($out + $c + '...') $Size) -gt $Width) { break }
-        $out += $c
-    }
-    return $out.TrimEnd() + '...'
-}
-
-function New-InstallSheetPdf {
-    <#
-        The same worksheet as New-InstallSheetHtml, as a PDF the technician can
-        save. Returns a byte array.
-
-        Written by hand rather than by driving a headless browser, which is
-        what this project did once and deliberately removed: a subprocess per
-        request, a browser dependency on a machine whose listener runs as
-        SYSTEM, and a throwaway profile directory to clean up afterwards. The
-        code below has no dependency at all and leaves nothing running.
-
-        The structure is the simplest one a reader accepts: a catalogue, a page
-        tree, two standard Type1 fonts (Helvetica is one of the fourteen every
-        reader has, so nothing is embedded), and one uncompressed content
-        stream per page. Uncompressed matters more than size at this scale -
-        the file stays greppable, which is how the tests check it.
-    #>
-    param(
-        [Parameter(Mandatory)]$Device,
-        [object[]]$Apps = @(),
-        $ScanAge,
-        [int]$SuppressedCount,
-        [int]$TotalCount
-    )
-
-    # A4 in points, matching the HTML sheet's @page.
-    $pageW = 595.0
-    $pageH = 842.0
-    $left  = 50.0
-    $right = $pageW - 50.0
-    $top   = $pageH - 55.0
-    $floor = 60.0
-
-    # Column positions. Notes is deliberately empty: it is where somebody
-    # writes "asked user, not needed" beside a row.
-    $colBox   = $left
-    $colApp   = $left + 20
-    $colVer   = $left + 228
-    $colPub   = $left + 302
-    $colNotes = $left + 406
-    $wApp     = 200.0
-    $wVer     = 68.0
-    $wPub     = 98.0
-
-    $parts = @($Apps).Count + $SuppressedCount
-    if ($TotalCount -lt $parts) { $TotalCount = $parts }
-
-    # ---- content-stream helpers -------------------------------------------
-    $ops = New-Object System.Collections.Generic.List[string]
-
-    function Add-PdfText {
-        param([double]$X, [double]$Y, [string]$Text, [double]$Size = 10,
-              [switch]$Bold, [double]$Gray = 0)
-        if ([string]::IsNullOrEmpty($Text)) { return }
-        $font = if ($Bold) { '/F2' } else { '/F1' }
-        $ops.Add(('BT {0} {1:0.##} Tf {2:0.##} g {3:0.##} {4:0.##} Td ({5}) Tj ET' -f
-                  $font, $Size, $Gray, $X, $Y, (ConvertTo-PdfText $Text)))
-    }
-    function Add-PdfLine {
-        param([double]$X1, [double]$Y1, [double]$X2, [double]$Y2,
-              [double]$Width = 0.5, [double]$Gray = 0)
-        $ops.Add(('{0:0.##} w {1:0.##} G {2:0.##} {3:0.##} m {4:0.##} {5:0.##} l S' -f
-                  $Width, $Gray, $X1, $Y1, $X2, $Y2))
-    }
-    function Add-PdfBox {
-        param([double]$X, [double]$Y, [double]$W, [double]$H)
-        $ops.Add(('0.7 w 0 G {0:0.##} {1:0.##} {2:0.##} {3:0.##} re S' -f $X, $Y, $W, $H))
-    }
-
-    # ---- lay the rows out into pages before drawing any -------------------
-    # The footer says "Page 1 of 3", so the count has to be known up front.
-    $rowH      = 18.0
-    $firstRows = [int][Math]::Floor(($top - 120 - $floor - 24) / $rowH)
-    $restRows  = [int][Math]::Floor(($top - 40  - $floor - 24) / $rowH)
-    if ($firstRows -lt 1) { $firstRows = 1 }
-    if ($restRows  -lt 1) { $restRows  = 1 }
-
-    $rows  = @($Apps)
-    $pages = New-Object System.Collections.Generic.List[object]
-    if ($rows.Count -eq 0) {
-        $pages.Add(@())
-    } else {
-        $i = 0
-        while ($i -lt $rows.Count) {
-            $take = if ($pages.Count -eq 0) { $firstRows } else { $restRows }
-            $last = [int][Math]::Min($i + $take - 1, $rows.Count - 1)
-            $pages.Add(@($rows[$i..$last]))
-            $i += $take
-        }
-    }
-    $pageCount = $pages.Count
-
-    # ---- draw ---------------------------------------------------------------
-    $streams = New-Object System.Collections.Generic.List[string]
-
-    for ($p = 0; $p -lt $pageCount; $p++) {
-
-        $ops.Clear()
-        $y = $top
-
-        if ($p -eq 0) {
-            Add-PdfText $left $y 'Applications to install' 17 -Bold
-            $y -= 20
-            Add-PdfLine $left $y $right $y 1.2
-            $y -= 16
-
-            $scanText = if ($null -ne $ScanAge) { "$ScanAge day(s) ago" } else { 'unknown' }
-            $meta = @(
-                @('DEVICE',             [string]$Device.deviceName),
-                @('SERIAL',             [string]$Device.serialNumber),
-                @('USER',               [string]$Device.username),
-                @('MODEL',              [string]$Device.systemModel),
-                @('LAST SOFTWARE SCAN', $scanText),
-                @('SHEET GENERATED',    (Get-Date -Format 'yyyy-MM-dd HH:mm'))
-            )
-            $colW = ($right - $left) / 3
-            for ($m = 0; $m -lt $meta.Count; $m++) {
-                $cx = $left + ($m % 3) * $colW
-                $cy = $y - [int][Math]::Floor($m / 3) * 26
-                Add-PdfText $cx $cy $meta[$m][0] 6.5 -Gray 0.42
-                Add-PdfText $cx ($cy - 11) (Limit-PdfCell $meta[$m][1] ($colW - 10) 10) 10
-            }
-            $y -= 50
-            Add-PdfLine $left $y $right $y 0.5 0.35
-            $y -= 16
-
-            $warnings = @()
-            if ($Device.agentStatus -ne 'A') {
-                $warnings += "Absolute agent is not active (status '$([string]$Device.agentStatus)') - this inventory may be out of date."
-            }
-            if ($null -ne $ScanAge -and $ScanAge -gt 30) {
-                $warnings += "Last software scan was $ScanAge days ago - confirm with the user that nothing is missing."
-            }
-            foreach ($w in $warnings) {
-                Add-PdfText $left $y (Limit-PdfCell $w ($right - $left) 9) 9
-                $y -= 13
-            }
-            if ($warnings.Count -gt 0) { $y -= 6 }
-        }
-        else {
-            Add-PdfText $left $y ('Applications to install - {0}' -f [string]$Device.serialNumber) 11 -Bold
-            $y -= 18
-        }
-
-        # Column headings repeat on every page, so a loose sheet still reads.
-        Add-PdfText $colApp   $y 'APPLICATION' 7 -Bold -Gray 0.3
-        Add-PdfText $colVer   $y 'VERSION'     7 -Bold -Gray 0.3
-        Add-PdfText $colPub   $y 'PUBLISHER'   7 -Bold -Gray 0.3
-        Add-PdfText $colNotes $y 'NOTES'       7 -Bold -Gray 0.3
-        $y -= 5
-        Add-PdfLine $left $y $right $y 0.8
-        $y -= $rowH
-
-        if ($pages[$p].Count -eq 0) {
-            Add-PdfText $colApp $y 'Nothing beyond the base image.' 10 -Gray 0.35
-            $y -= $rowH
-        }
-        foreach ($a in $pages[$p]) {
-            Add-PdfBox  $colBox ($y - 1) 9 9
-            Add-PdfText $colApp $y (Limit-PdfCell ([string]$a.AppName)   $wApp 10)  10 -Bold
-            Add-PdfText $colVer $y (Limit-PdfCell ([string]$a.Version)   $wVer 8.5) 8.5 -Gray 0.2
-            Add-PdfText $colPub $y (Limit-PdfCell ([string]$a.Publisher) $wPub 8.5) 8.5 -Gray 0.2
-            Add-PdfLine $left ($y - 6) $right ($y - 6) 0.3 0.75
-            $y -= $rowH
-        }
-
-        Add-PdfLine $left ($floor + 16) $right ($floor + 16) 0.5
-        if ($p -eq $pageCount - 1) {
-            Add-PdfText $left ($floor + 5) (
-                '{0} to install - {1} of {2} inventoried applications suppressed as base image, driver or runtime.' -f
-                @($Apps).Count, $SuppressedCount, $TotalCount) 8 -Gray 0.25
-        }
-        Add-PdfText ($right - 62) ($floor + 5) ('Page {0} of {1}' -f ($p + 1), $pageCount) 8 -Gray 0.25
-
-        $streams.Add(($ops -join "`n"))
-    }
-
-    # ---- assemble -----------------------------------------------------------
-    # Byte offsets in the xref table must be exact, so the file is built into a
-    # stream and each object's offset recorded as it is written.
-    $enc     = [System.Text.Encoding]::GetEncoding(1252)
-    $ms      = New-Object System.IO.MemoryStream
-    $offsets = @{}
-
-    function Add-PdfRaw {
-        param([string]$Text)
-        $b = $enc.GetBytes($Text)
-        $ms.Write($b, 0, $b.Length)
-    }
-    function Add-PdfObject {
-        param([int]$Number, [string]$Body)
-        $offsets[$Number] = [int]$ms.Position
-        Add-PdfRaw ("{0} 0 obj`n{1}`nendobj`n" -f $Number, $Body)
-    }
-
-    Add-PdfRaw "%PDF-1.4`n"
-    # A binary comment, so anything transferring the file treats it as binary.
-    $ms.Write([byte[]](0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A), 0, 6)
-
-    $kids = @()
-    for ($p = 0; $p -lt $pageCount; $p++) { $kids += ('{0} 0 R' -f (5 + 2 * $p)) }
-
-    Add-PdfObject 1 '<< /Type /Catalog /Pages 2 0 R >>'
-    Add-PdfObject 2 ('<< /Type /Pages /Kids [{0}] /Count {1} >>' -f ($kids -join ' '), $pageCount)
-    Add-PdfObject 3 '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>'
-    Add-PdfObject 4 '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'
-
-    for ($p = 0; $p -lt $pageCount; $p++) {
-        $pageObj    = 5 + 2 * $p
-        $contentObj = 6 + 2 * $p
-
-        # Parenthesised before -f on purpose: the format operator binds tighter
-        # than +, so concatenating first would format only the second half and
-        # leave {0} sitting in the page dictionary as literal text.
-        Add-PdfObject $pageObj ((
-            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {0:0.##} {1:0.##}] ' +
-            '/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {2} 0 R >>'
-            ) -f $pageW, $pageH, $contentObj)
-
-        # /Length is a byte count, not a character count.
-        $stream = $streams[$p]
-        Add-PdfObject $contentObj (
-            "<< /Length {0} >>`nstream`n{1}`nendstream" -f $enc.GetByteCount($stream), $stream)
-    }
-
-    # The cross-reference table. Every entry is exactly 20 bytes; a reader that
-    # seeks by offset will land mid-object if that is wrong by one.
-    $maxObj  = 4 + 2 * $pageCount
-    $size    = $maxObj + 1
-    $xrefPos = [int]$ms.Position
-
-    Add-PdfRaw ("xref`n0 {0}`n" -f $size)
-    Add-PdfRaw "0000000000 65535 f `n"
-    for ($n = 1; $n -le $maxObj; $n++) {
-        Add-PdfRaw ("{0:D10} 00000 n `n" -f [int]$offsets[$n])
-    }
-    Add-PdfRaw ("trailer`n<< /Size {0} /Root 1 0 R >>`nstartxref`n{1}`n%%EOF`n" -f $size, $xrefPos)
-
-    $bytes = $ms.ToArray()
-    $ms.Dispose()
-    return ,$bytes
-}
-
 function New-InstallSheetHtml {
     <#
         A worksheet, not a report: a tick box per row so the sheet can be
@@ -837,10 +534,8 @@ function New-InstallSheetHtml {
         [object[]]$Suppressed = @(),
 
         # When the sheet is served from a web front end rather than saved to
-        # disk, these put a download button and a "new lookup" link in the
-        # toolbar. Screen only, and omitted entirely when neither is given.
-        [string]$HomeLink,
-        [string]$DownloadLink
+        # disk, this puts a "new lookup" link in the toolbar. Screen only.
+        [string]$HomeLink
     )
 
     $rows = foreach ($a in $Apps) {
@@ -878,19 +573,18 @@ function New-InstallSheetHtml {
     $parts = @($Apps).Count + $SuppressedCount
     if ($TotalCount -lt $parts) { $TotalCount = $parts }
 
-    # Print, then anything else the caller asked for. The button's inline
-    # handler is what the server's CSP allows by hash: 'unsafe-hashes' plus the
-    # SHA-256 of window.print(). Change that handler's text by so much as a
-    # space and the hash must be recomputed, or the button silently stops
+    # Print, and a back link when the caller asked for one. The button's
+    # inline handler is what the server's CSP allows by hash: 'unsafe-hashes'
+    # plus the SHA-256 of window.print(). Change that handler's text by so much
+    # as a space and the hash must be recomputed, or the button silently stops
     # working.
     #
-    # -DownloadLink adds a PDF button beside it. The server does not pass one
-    # today; the route behind it still exists.
+    # There is no separate PDF button. The browser's own print dialogue offers
+    # Save as PDF as a destination, which is the same result with none of the
+    # code - a hand-written PDF writer and a second route lived here for a day
+    # and came out again for exactly that reason.
     $toolbarBits  = "    <button class=`"action`" type=`"button`" onclick=`"window.print()`">Print this sheet</button>`n"
     $toolbarBits += "    <span class=`"hint`">or press Ctrl+P</span>`n"
-    if ($DownloadLink) {
-        $toolbarBits += "    <a class=`"action`" href=`"$(ConvertTo-HtmlText $DownloadLink)`">Download</a>`n"
-    }
     if ($HomeLink) {
         $toolbarBits += "    <a class=`"hint`" href=`"$(ConvertTo-HtmlText $HomeLink)`">&larr; look up another device</a>`n"
     }
@@ -1183,8 +877,6 @@ Export-ModuleMember -Function ConvertTo-NormalizedAppName, ConvertTo-NormalizedP
                               Import-AppRule, Get-AppClassification, Add-AppRule,
                               Get-AbsoluteCredential, Invoke-AbsoluteApi, Get-AbsoluteV3,
                               Get-RefreshApps, New-InstallSheetHtml, ConvertTo-HtmlText,
-                              New-InstallSheetPdf, ConvertTo-PdfText, Get-PdfTextWidth,
-                              Limit-PdfCell,
                               Save-InstallSheet, Read-IndexSelection, ConvertTo-Base64Url,
                               Get-DataProperty, Get-PageData, Get-NextPageToken,
                               ConvertTo-CsvSafeText, ConvertFrom-CsvSafeText

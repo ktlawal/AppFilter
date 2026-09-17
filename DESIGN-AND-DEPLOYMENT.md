@@ -501,57 +501,41 @@ in this instance, but the guard was not deciding, it was being skipped.
 The sheet footer now also raises its total to at least the parts it can see, so
 arithmetic that cannot be true cannot reach a technician again.
 
-## 16. Built a PDF download, then went back to printing
+## 16. Built a PDF download, then removed it
 
-**Done, and largely undone the next day.** The **Print this sheet** button was
-replaced by **Download**, pointing at a new `/appfilter/download?serial=X` route
-that returns the sheet as a PDF written by `New-InstallSheetPdf`. A day later
-the decision reversed and the print button came back. **The route and the PDF
-writer are still there and still work; nothing links to them.** Putting the
-button back is one `-DownloadLink` argument on the server's
-`New-InstallSheetHtml` call.
+**Done, and undone.** For one day the **Print this sheet** button was replaced
+by **Download**, pointing at a `/appfilter/download?serial=X` route that
+returned the sheet as a PDF written by hand in PowerShell -
+`New-InstallSheetPdf`, about 250 lines: a catalogue, a page tree, two standard
+Type1 fonts and one uncompressed content stream per page. It worked, it was
+tested, and it is gone.
 
-**For:** Printing costs money the department would rather not spend on a list
-that is read once. That reasoning did not survive contact with the technicians,
-which is why the section is written this way rather than deleted - the work is
-intact and the next reversal is one argument.
+**Why it was built:** printing costs money the department would rather not
+spend on a list that is read once.
 
-**Alternatives considered:**
+**Why it came out:** the browser's own print dialogue already offers **Save as
+PDF** as a destination. A technician who wants a file rather than paper picks it
+there. The whole feature - a PDF writer, a second route, and a second call to
+the Absolute API every time somebody downloaded - bought a capability the
+browser was giving away for free. Printing was reinstated and the PDF path
+removed entirely rather than left sitting unused.
 
-| Option | Why not |
-|---|---|
-| Keep `window.print()` and let the technician choose "Save as PDF" | That is the print dialogue, which is the thing being steered away from, and it produces a file only if the user picks the right destination. |
-| Drive headless Edge or Chrome to render the PDF server-side | This project did exactly that once and removed it: a subprocess per request, a browser dependency on a machine whose listener runs as SYSTEM, and a throwaway profile directory to clean up. Reintroducing it for a two-page list is a poor trade. |
-| A JavaScript PDF library in the browser (jsPDF and similar) | Either an external CDN, which the CSP forbids and the network may not reach, or several hundred kilobytes inlined into every sheet. |
-| Write the PDF by hand in PowerShell | **Chosen.** No dependency, nothing left running, and it works under the startup task exactly as it does interactively. |
+**Recorded here rather than deleted quietly**, because the next person to think
+"we should generate a PDF" deserves to know it was done, it worked, and it was
+not worth keeping. The code is at commit `e7b8baa`.
 
-**What that costs, honestly:** about 250 lines of PDF-format code, and a second
-call to the Absolute API when someone downloads — the server keeps no state
-between requests, so the download route runs the lookup again. It also means
-the download appears in the log under the technician's own name, which is a
-small gain.
+**Two things from that week did survive**, both worth more than the feature was:
 
-**Three details in that code are load-bearing**, each learned the hard way:
-
-- **Byte offsets in the cross-reference table have to be exact.** A reader seeks
-  by offset, so being one byte out lands it mid-object. The file is assembled
-  into a stream with every object's offset recorded as it is written, and a test
-  walks each offset back to the object it claims to point at.
-- **PowerShell's `-f` binds tighter than `+`.** A format string split across a
-  concatenation formats only its second half — which left `{0}` in the page
-  dictionary as literal text and produced a PDF that opened but carried no page
-  size. Caught by rendering it, then pinned by a test that fails on any `{`
-  followed by a digit.
-- **Parentheses and backslashes end a PDF string early.** `7-Zip (x64)` is an
-  ordinary application name and would have truncated its own line.
-
-**The lesson that outlived the decision:** the toolbar and the CSP move
-together. A print button needs `'unsafe-hashes'` plus the SHA-256 of
-`window.print()` in the policy; with no inline handler at all, `script-src` can
-be `'none'`. Change one without the other and the button stops working with no
-error anywhere - which is why a test now pins the handler's exact text, and why
-the hash was verified against the page the module actually emits rather than
-against the string in the source.
+- **The toolbar and the CSP move together.** A print button means
+  `'unsafe-hashes'` plus the SHA-256 of `window.print()` in the policy; with no
+  inline handler at all, `script-src` can be `'none'`. Change one without the
+  other and the button stops working with no error anywhere. A test now pins
+  the handler's exact text, and the hash was verified against the page the
+  module actually emits rather than against the string in the source.
+- **Sheet wording.** The suppressed block is headed **Suppressed applications**,
+  and its explanation ends "...already provides them, or they were pushed" -
+  because a pushed application is the other reason something legitimately is not
+  on the install list.
 
 ---
 
