@@ -44,9 +44,9 @@ Everything below is in service of this sequence.
    token.
 5. Every application is classified against the rules (Part III): suppressed, or
    an install candidate.
-6. The install candidates are rendered as a tick-box sheet, with a **Download**
-   button that returns the same sheet as a PDF. The suppressed ones go into a
-   collapsed list underneath, so "why isn't X here?" has an answer on the page.
+6. The install candidates are rendered as a printable tick-box sheet. The
+   suppressed ones go into a collapsed list underneath, so "why isn't X here?"
+   has an answer on the page.
 7. The request is logged: timestamp, the caller's domain account, the serial,
    and the outcome (`16 to install of 72`).
 
@@ -501,15 +501,20 @@ in this instance, but the guard was not deciding, it was being skipped.
 The sheet footer now also raises its total to at least the parts it can see, so
 arithmetic that cannot be true cannot reach a technician again.
 
-## 16. Replaced printing with a downloadable PDF
+## 16. Built a PDF download, then went back to printing
 
-**Done:** The **Print this sheet** button became **Download**, pointing at a new
-`/appfilter/download?serial=X` route that returns the sheet as a PDF
-attachment. `New-InstallSheetPdf` in the module writes the PDF itself.
+**Done, and largely undone the next day.** The **Print this sheet** button was
+replaced by **Download**, pointing at a new `/appfilter/download?serial=X` route
+that returns the sheet as a PDF written by `New-InstallSheetPdf`. A day later
+the decision reversed and the print button came back. **The route and the PDF
+writer are still there and still work; nothing links to them.** Putting the
+button back is one `-DownloadLink` argument on the server's
+`New-InstallSheetHtml` call.
 
 **For:** Printing costs money the department would rather not spend on a list
-that is read once. Printing may come back later, so nothing was removed that
-would be hard to restore.
+that is read once. That reasoning did not survive contact with the technicians,
+which is why the section is written this way rather than deleted - the work is
+intact and the next reversal is one argument.
 
 **Alternatives considered:**
 
@@ -540,14 +545,13 @@ small gain.
 - **Parentheses and backslashes end a PDF string early.** `7-Zip (x64)` is an
   ordinary application name and would have truncated its own line.
 
-**The print button can come back** in one block: the toolbar markup in
-`New-InstallSheetHtml`, plus the CSP exception the server used to carry —
-`'unsafe-hashes'` and the SHA-256 of `window.print()`. With no inline handler
-left, `script-src` is now `'none'` outright, which is a small security gain that
-fell out of the change.
-
-**Ctrl+P still prints.** A page cannot block that and should not try; what
-changed is that nothing invites it.
+**The lesson that outlived the decision:** the toolbar and the CSP move
+together. A print button needs `'unsafe-hashes'` plus the SHA-256 of
+`window.print()` in the policy; with no inline handler at all, `script-src` can
+be `'none'`. Change one without the other and the button stops working with no
+error anywhere - which is why a test now pins the handler's exact text, and why
+the hash was verified against the page the module actually emits rather than
+against the string in the source.
 
 ---
 

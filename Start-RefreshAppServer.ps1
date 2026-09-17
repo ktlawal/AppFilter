@@ -532,14 +532,18 @@ try {
                     $body = New-InstallSheetHtml -Device $result.Device -Apps $result.ToInstall `
                                 -ScanAge $result.ScanAge -SuppressedCount $result.Excluded.Count `
                                 -Suppressed $result.Excluded `
-                                -TotalCount $result.Apps.Count -HomeLink $BasePath `
-                                -DownloadLink ("{0}download?serial={1}" -f $BasePath, [Uri]::EscapeDataString($serial))
+                                -TotalCount $result.Apps.Count -HomeLink $BasePath
                     Write-RequestLog -User $user -Serial $serial `
                         -Outcome "$($result.ToInstall.Count) to install of $($result.Apps.Count)"
                     break
                 }
 
                 '^/download/?$' {
+                    # Still served, but no longer linked from the sheet: the
+                    # print button came back and the Download button went with
+                    # it. Linking it again is one argument on the
+                    # New-InstallSheetHtml call above.
+                    #
                     # The same lookup again rather than cached state: the
                     # server keeps nothing between requests, and a second call
                     # to Absolute costs a couple of seconds against the risk of
@@ -610,13 +614,15 @@ try {
                      else { [Text.Encoding]::UTF8.GetBytes($body) }
             $context.Response.StatusCode = $status
 
-            # The pages carry no external resources and, since the print button
-            # became a download link, no script at all - so script-src is now
-            # 'none' outright. It used to be 'unsafe-hashes' plus the SHA-256 of
-            # window.print(), the one inline handler; that pair comes back
-            # together with the button if printing ever returns.
+            # The pages carry no external resources and one inline handler:
+            # the sheet's print button. 'unsafe-hashes' plus the SHA-256 of
+            # window.print() permits exactly that and no other script - an
+            # inline event handler cannot be allowed by hash without it. The
+            # hash is over the handler's text, so editing the handler means
+            # recomputing it or the button silently stops working.
             $context.Response.AddHeader('Content-Security-Policy',
-                "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; " +
+                "default-src 'none'; style-src 'unsafe-inline'; " +
+                "script-src 'unsafe-hashes' 'sha256-MguIPR6qNR8D3B+eAlK+bIRTZe8t3wkOY4B/56Me9FU='; " +
                 "img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
             $context.Response.AddHeader('X-Content-Type-Options', 'nosniff')
             $context.Response.AddHeader('X-Frame-Options', 'DENY')

@@ -878,25 +878,23 @@ function New-InstallSheetHtml {
     $parts = @($Apps).Count + $SuppressedCount
     if ($TotalCount -lt $parts) { $TotalCount = $parts }
 
-    # The toolbar is a download button and a back link, and nothing when
-    # there is neither - a sheet saved to disk by the console front end has no
-    # server behind it to ask for a PDF.
+    # Print, then anything else the caller asked for. The button's inline
+    # handler is what the server's CSP allows by hash: 'unsafe-hashes' plus the
+    # SHA-256 of window.print(). Change that handler's text by so much as a
+    # space and the hash must be recomputed, or the button silently stops
+    # working.
     #
-    # There is no print button. Printing was withdrawn on cost grounds; the
-    # browser's own Ctrl+P still works and is not something a page can or
-    # should try to block. Bringing the button back is this block plus the
-    # CSP hash the server used to carry for its inline handler.
-    $toolbarBits = ''
+    # -DownloadLink adds a PDF button beside it. The server does not pass one
+    # today; the route behind it still exists.
+    $toolbarBits  = "    <button class=`"action`" type=`"button`" onclick=`"window.print()`">Print this sheet</button>`n"
+    $toolbarBits += "    <span class=`"hint`">or press Ctrl+P</span>`n"
     if ($DownloadLink) {
         $toolbarBits += "    <a class=`"action`" href=`"$(ConvertTo-HtmlText $DownloadLink)`">Download</a>`n"
     }
     if ($HomeLink) {
         $toolbarBits += "    <a class=`"hint`" href=`"$(ConvertTo-HtmlText $HomeLink)`">&larr; look up another device</a>`n"
     }
-    $toolbarHtml = ''
-    if ($toolbarBits) {
-        $toolbarHtml = "  <div class=`"toolbar screen-only`">`n$toolbarBits  </div>`n"
-    }
+    $toolbarHtml = "  <div class=`"toolbar screen-only`">`n$toolbarBits  </div>`n"
 
     # The suppressed list answers one question and only one: the user says they
     # had X, it is not on the sheet - was it filtered out, or was it never in

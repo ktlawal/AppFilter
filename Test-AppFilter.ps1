@@ -241,7 +241,7 @@ $shSupp   = @(
 )
 $sheet = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 2 `
              -SuppressedCount $shSupp.Count -Suppressed $shSupp -TotalCount 5 `
-             -HomeLink '/appfilter/' -DownloadLink '/appfilter/download?serial=ABC1234'
+             -HomeLink '/appfilter/'
 
 Assert-Envelope 'details, collapsed'    ($sheet -match '<details class="filtered screen-only">')  'True'
 Assert-Envelope 'summary carries count' ($sheet -match 'Suppressed applications \(4\)')           'True'
@@ -258,15 +258,22 @@ Assert-Envelope 'name escaped'          ($sheet -match '<li>&lt;script&gt;x&lt;/
 Assert-Envelope 'version escaped'       ($sheet -match 'class="v">1&quot;2</span>')               'True'
 Assert-Envelope 'no raw script tag'     ($sheet -match '<script>')                                'False'
 
-# Printing was withdrawn on cost grounds. The button and its inline handler are
-# gone, which is also what let the server drop 'unsafe-hashes' from its CSP - so
-# a window.print() creeping back in is a policy change, not a cosmetic one.
-Assert-Envelope 'no print handler'      ($sheet -match 'window\.print')                            'False'
-Assert-Envelope 'download link present' ($sheet -match '<a class="action" href="[^"]*download\?serial=ABC1234">Download</a>') 'True'
+# The print button's handler is the one script the server's CSP allows, by the
+# SHA-256 of its exact text. Change the text and the hash in
+# Start-RefreshAppServer.ps1 must change with it, so pin the text here.
+Assert-Envelope 'print handler exact'   ($sheet -match 'onclick="window\.print\(\)">Print this sheet</button>') 'True'
+Assert-Envelope 'Ctrl+P hint'           ($sheet -match 'or press Ctrl\+P')                         'True'
 Assert-Envelope 'back link kept'        ($sheet -match 'look up another device')                   'True'
-# A sheet saved to disk has no server to ask for a PDF, so it gets no toolbar.
+# A download button appears only when the caller asks for one. The server does
+# not today; the route behind it still exists.
+Assert-Envelope 'no download by default' ($sheet -match '>Download</a>')                           'False'
+$shDl = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 1 -SuppressedCount 0 -TotalCount 1 `
+            -DownloadLink '/appfilter/download?serial=ABC1234'
+Assert-Envelope 'download when asked'   ($shDl -match '<a class="action" href="[^"]*download\?serial=ABC1234">Download</a>') 'True'
+# A sheet saved to disk still gets its print button, with no links beside it.
 $shNoTools = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 1 -SuppressedCount 0 -TotalCount 1
-Assert-Envelope 'no links, no toolbar'  ($shNoTools -match 'class="toolbar')                       'False'
+Assert-Envelope 'saved sheet prints'    ($shNoTools -match 'Print this sheet')                     'True'
+Assert-Envelope 'saved sheet, no links' ($shNoTools -match 'look up another device')               'False'
 
 # The footer stated "1 of 0" on a real device: one application, suppressed, and
 # a total of zero. A total below the parts it is made of cannot be true, so the
@@ -288,7 +295,7 @@ $shPlain = New-InstallSheetHtml -Device $shDevice -Apps $shApps -ScanAge 2 `
 Assert-Envelope 'no list, no details'   ($shPlain -match '<details')                              'False'
 Assert-Envelope 'footer count stands'   ($shPlain -match '4 of 5 inventoried applications')       'True'
 
-Write-Host "`nDownloadable PDF" -ForegroundColor Cyan
+Write-Host "`nDownloadable PDF (kept, not linked from the sheet)" -ForegroundColor Cyan
 # Written by hand, so the parts a reader will reject are worth asserting: the
 # header, the terminator, a cross-reference table, and the page tree agreeing
 # with the number of pages actually emitted. The content stream is left
