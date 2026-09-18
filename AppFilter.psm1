@@ -127,7 +127,16 @@ function ConvertTo-NormalizedAppName {
 
             'Tanium Client 7.8.1.3126'        -> 'tanium client'
             '7-Zip 19.00 (x64 edition)'       -> '7-zip'
-            'Thunderbolt(tm) Software'        -> 'thunderbolt software'
+            'Thunderbolt™ Software'           -> 'thunderbolt software'
+
+        Only the symbols are stripped, not their ASCII spellings. '(tm)' and
+        '(R)' survive, so 'Intel(R) Chipset Device Software' keys as
+        'intel(r) chipset device software'. Nothing depends on that today -
+        the applications that report an ASCII '(R)' are caught by a publisher
+        rule instead - but a name rule written without the '(r)' will not
+        match a device that reports one. There is a test pinning this, so a
+        change to the regex fails loudly rather than silently reshuffling
+        which rules match.
 
         Numbers that are part of a product's name are deliberately kept:
         'Microsoft 365', 'Paint 3D' and 'OneNote for Windows 10' survive,

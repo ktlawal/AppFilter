@@ -366,8 +366,9 @@ against live devices return sensible counts (`6 to install of 71`,
 | `Start-RefreshAppServer.ps1` | **The web front end**, and the one that matters day to day. Runs under the startup task. | **Yes** |
 | `Get-RefreshAppList.ps1` | Console front end. Same classifier, plus the curation prompt, which is console-only. | **Yes** |
 | `AppRules.csv` | Every suppression rule: 82 name, 12 publisher, 14 pattern. Editing rules is a data change, not a code change. | No |
-| `Test-AppFilter.ps1` | 99 cases: normalizers, classification against two real inventories, API envelope shapes, HTML escaping, the sheet's suppressed list and toolbar. Needs no credential and no network. **Run it after touching a normalizer or the rules file.** | No |
+| `Test-AppFilter.ps1` | 109 cases: normalizers, classification against two real inventories, API envelope shapes, HTML escaping, the sheet's suppressed list and toolbar. Needs no credential and no network. **Run it after touching a normalizer or the rules file.** | No |
 | `Debug-AbsoluteLookup.ps1` | Run when a lookup says "no device matched" for a device you believe exists. Separates a wrong-tenant token, a token that cannot read devices, and a serial that is genuinely gone. | **Yes** |
+| `Explain-AppRule.ps1` | Offline. Takes an application name and says which of the three stages caught it, what the other stages saw, and which later rule *would* have matched had an earlier one not won. `-Summary` prints the shape of the rule set. Built for answering "why is X not on my sheet?" in front of an audience. | No |
 | `Find-ServerCertificate.ps1` | Read-only. Finds a certificate that can serve https, says whether it chains, and prints the binding command. | No |
 | `Application-List-Technician-Guide.docx` | Two-page how-to for technicians, for the SharePoint library. **The URL in it is a placeholder** — replace `https://<lab-machine>.<domain>:5000/appfilter/` and the contact line before publishing. | No |
 | `Application-List-Quick-Reference.docx` | One page: the URL and the three routes, nothing else. For pinning up or keeping open. Host name is a placeholder. | No |

@@ -22,7 +22,7 @@ Import-Module $module -Force -ErrorAction Stop
 
 # Both front ends are only worth testing if they parse. Catch a syntax error
 # here rather than when a technician runs one.
-foreach ($front in 'Get-RefreshAppList.ps1', 'Start-RefreshAppServer.ps1') {
+foreach ($front in 'Get-RefreshAppList.ps1', 'Start-RefreshAppServer.ps1', 'Explain-AppRule.ps1') {
     $path = Join-Path $PSScriptRoot $front
     if (-not (Test-Path $path)) { throw "Cannot find $front next to this test." }
     $errors = $null; $tokens = $null
@@ -210,6 +210,40 @@ Assert-Envelope 'null response: rows'   (@(Get-PageData $null)).Count         0
 $row = [pscustomobject]@{ appName = 'Thing' }
 Assert-Envelope 'missing field is null' (Get-DataProperty $row 'lastScanDateTimeUtc') ''
 Assert-Envelope 'present field reads'   (Get-DataProperty $row 'appName')  'Thing'
+
+Write-Host "`nTrademark spellings" -ForegroundColor Cyan
+# The symbols are stripped; their ASCII spellings are not. Pinned because the
+# module's docstring says so, and because changing the regex would silently
+# reshuffle which rules match rather than failing anywhere visible.
+Assert-Key 'Thunderbolt(tm) Software'  'thunderbolt(tm) software'  $appFn
+Assert-Key 'Thunderbolt™ Software'     'thunderbolt software'      $appFn
+Assert-Key 'Intel(R) Chipset Device Software' 'intel(r) chipset device software' $appFn
+Assert-Key 'Intel® Chipset Device Software'   'intel chipset device software'    $appFn
+
+Write-Host "`nExplain-AppRule agrees with the classifier" -ForegroundColor Cyan
+# The explainer walks the three stages itself so it can report what every
+# stage saw. That is a second implementation of the same order, so it has to
+# be held to the first one - otherwise the tool used to answer "why was this
+# filtered?" can drift away from what actually filtered it.
+$explain = Join-Path $PSScriptRoot 'Explain-AppRule.ps1'
+$explainCases = @(
+    @('BitLocker Drive Encryption', 'Microsoft'),
+    @('Dell Digital Delivery',      'Dell Products'),
+    @('Intel(R) Chipset Device Software', 'Intel Corporation'),
+    @('Microsoft Visual C++ 2012 Redistributable (x64) - 11.0.61030', 'Microsoft'),
+    @('Bluebeam Revu 21',           'Bluebeam, Inc.'),
+    @('7-Zip 24.09 (x64)',          'Igor Pavlov')
+)
+foreach ($case in $explainCases) {
+    $app  = [pscustomobject]@{ appName = $case[0]; appPublisher = $case[1] }
+    $want = Get-AppClassification -App $app -Rules $rules
+    $got  = (& $explain -Name $case[0] -Publisher $case[1] -PassThru).Reason
+    $wantLabel = $want
+    if (-not $wantLabel) { $wantLabel = '(install candidate)' }
+    $gotLabel = $got
+    if (-not $gotLabel) { $gotLabel = '(install candidate)' }
+    Assert-Envelope ("explains: " + $case[0].Substring(0, [Math]::Min(34, $case[0].Length))) $gotLabel $wantLabel
+}
 
 Write-Host "`nHTML escaping" -ForegroundColor Cyan
 # The server echoes a rejected serial back into value="...", so a bare quote

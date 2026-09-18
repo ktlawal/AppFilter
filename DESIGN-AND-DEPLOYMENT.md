@@ -695,6 +695,18 @@ in the three shapes that actually occur — dash-separated (`... - 11.0.61030`),
 `v`-prefixed (`... v14`), and dotted with two or more parts
 (`... 7.8.1.3126`). Then it collapses whitespace and lowercases.
 
+**Only the symbols, not their ASCII spellings.** `(tm)` and `(R)` survive, so
+`Intel(R) Chipset Device Software` keys as `intel(r) chipset device software`.
+Nothing depends on it today — the applications that report an ASCII `(R)` are
+caught by a publisher rule instead — but a name rule written without the `(r)`
+will not match a device that reports one. Four tests pin this, so changing the
+regex fails loudly rather than silently reshuffling which rules match.
+
+**82 name rows load as 81 keys.** The x64 and x86 rows of the same Visual C++
+redistributable normalize to one key. Nothing is lost — the rules are a set —
+and `Explain-AppRule.ps1 -Summary` prints the collision rather than leaving two
+numbers that disagree.
+
 **A bare trailing integer is deliberately not treated as a version**, so
 `Microsoft 365`, `Paint 3D` and `OneNote for Windows 10` keep their numbers. A
 version stripper that ate them would merge genuinely different products.
@@ -761,6 +773,34 @@ Anything added later through the console curation prompt is stamped
 
 One normalization collision exists — the x86 and x64 rows of the same Visual
 C++ redistributable — and it is harmless, because the rules are a set.
+
+## Answering "why was this filtered?" on the spot
+
+`Explain-AppRule.ps1` walks the same three stages and shows its working. It
+needs no credential and no network — just the rules file:
+
+```
+.\Explain-AppRule.ps1 'Intel(R) Chipset Device Software' -Publisher 'Intel Corporation'
+
+  normalized name       intel(r) chipset device software
+  normalized publisher  intel
+
+  1 Name        -       no rule for 'intel(r) chipset device software'
+  2 Publisher   MATCH   rule 'intel'  ->  Driver / OEM
+                        (stage 3 would also have matched pattern 'Chipset'
+                         (Runtime / component), but stage 2 won first)
+
+  VERDICT   suppressed - Driver / OEM
+```
+
+That last parenthesis is the ordering doing visible work: two rules could have
+claimed this application, and which one did decides what the sheet calls it.
+
+`-Brief` gives one line per application for checking several at once,
+`-PassThru` returns objects for scripting, and `-Summary` prints the rule set's
+shape. Because it re-implements the stage order to report on it, a test holds
+its verdict against `Get-AppClassification` itself — otherwise the tool used to
+explain the filter could drift away from the filter.
 
 ## Adding or removing a rule
 
