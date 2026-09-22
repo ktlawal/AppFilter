@@ -365,7 +365,7 @@ against live devices return sensible counts (`6 to install of 71`,
 | `AppFilter.psm1` | **The engine.** Classifier, Absolute API client, HTML generation, rule read/write. Both front ends import it. Put new behaviour here. | **No** — takes the credential as a parameter |
 | `Start-RefreshAppServer.ps1` | **The web front end**, and the one that matters day to day. Runs under the startup task. | **Yes** |
 | `Get-RefreshAppList.ps1` | Console front end. Same classifier, plus the curation prompt, which is console-only. | **Yes** |
-| `AppRules.csv` | Every suppression rule: 82 name, 12 publisher, 14 pattern. Editing rules is a data change, not a code change. | No |
+| `AppRules.csv` | Every suppression rule: 95 name, 12 publisher, 14 pattern. Editing rules is a data change, not a code change. | No |
 | `Test-AppFilter.ps1` | 109 cases: normalizers, classification against two real inventories, API envelope shapes, HTML escaping, the sheet's suppressed list and toolbar. Needs no credential and no network. **Run it after touching a normalizer or the rules file.** | No |
 | `Debug-AbsoluteLookup.ps1` | Run when a lookup says "no device matched" for a device you believe exists. Separates a wrong-tenant token, a token that cannot read devices, and a serial that is genuinely gone. | **Yes** |
 | `Explain-AppRule.ps1` | Offline. Takes an application name and says which of the three stages caught it, what the other stages saw, and which later rule *would* have matched had an earlier one not won. `-Summary` prints the shape of the rule set. Built for answering "why is X not on my sheet?" in front of an audience. | No |
@@ -427,7 +427,7 @@ The `Name` rules are not hand-curated guesswork. They are:
 `Adobe Creative Cloud` was queried and confirmed as base image, so it stays in.
 
 82 `Name` rules, plus 12 `Publisher` and 14 `Pattern` rules carried over from
-the arrays that used to be in the script — 108 rows in total. The one
+the arrays that used to be in the script, plus 13 added in September from a real refresh (inbox Store apps, Remote Help, and the Adobe component that installs with Acrobat) — 121 rows in total. The one
 normalization collision is the x86/x64 pair of the same Visual C++
 redistributable, which is harmless: the rules are a set.
 

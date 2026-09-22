@@ -147,7 +147,7 @@ Full behaviour and worked examples are in Part III.
 
 ## 4. Move the rules out of code and into a CSV
 
-**Done:** `AppRules.csv`, 108 rows, three match types, each row carrying its
+**Done:** `AppRules.csv`, 121 rows, three match types, each row carrying its
 own `Reason`, `Active` flag and provenance.
 
 **For:** Adding a rule should be a data edit, not a code change and a redeploy.
@@ -651,7 +651,7 @@ All 108 live in `AppRules.csv`, one per row, distinguished by `MatchType`:
 
 | MatchType | Count | Matched against | Example row | Reason it carries |
 |---|---|---|---|---|
-| `Name` | 82 | the **normalized** application name | `Microsoft Teams` | Base image |
+| `Name` | 95 | the **normalized** application name | `Microsoft Teams` | Base image |
 | `Publisher` | 12 | the **normalized** publisher | `Dell` | Driver / OEM |
 | `Pattern` | 14 | the **raw** application name, as a regex | `Visual C\+\+` | Runtime / component |
 
@@ -702,7 +702,7 @@ caught by a publisher rule instead — but a name rule written without the `(r)`
 will not match a device that reports one. Four tests pin this, so changing the
 regex fails loudly rather than silently reshuffling which rules match.
 
-**82 name rows load as 81 keys.** The x64 and x86 rows of the same Visual C++
+**95 name rows load as 94 keys.** The x64 and x86 rows of the same Visual C++
 redistributable normalize to one key. Nothing is lost — the rules are a set —
 and `Explain-AppRule.ps1 -Summary` prints the collision rather than leaving two
 numbers that disagree.
@@ -762,7 +762,13 @@ Not guesswork. Every row carries its `Source`:
   `3D Viewer`, `Paint 3D`, `OneNote for Windows 10`, Microsoft 365 variants,
   the Teams add-in entries). The devices being refreshed are old, so old-image
   names still need to match.
-- **6** `hand-review` — inbox apps confirmed by hand off a real run
+- **19** `hand-review` — inbox apps confirmed by hand off a real run. Thirteen
+  of these were added in September 2026 from one refresh: the Windows inbox
+  Store apps a technician was being asked to reinstall (Game Bar, Mail, Media
+  Player, Movies & TV, Phone Link, Skype, Solitaire, Tips, the two Xbox
+  entries, Mixed Reality Portal), plus Remote Help, which is pushed by IT
+  rather than shipped with Windows, and the Adobe Genuine Software Monitor
+  Service, which arrives with Acrobat
 - **3** `hand-review-1of2` — landed in the "on one of two devices" bucket and
   were judged base image by hand
 - **1** `name-variant` — a short name Absolute reports where the baseline held
