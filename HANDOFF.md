@@ -390,6 +390,21 @@ none.
 - Inbound firewall rule, TCP 5000, Domain profile only
 - Absolute token restricted to approved egress IPs
 
+**Keeping the machine in step with the repo.** The server reads
+`AppRules.csv` and imports the module **once, at startup** - editing either on
+disk changes nothing until the scheduled task is restarted. After copying new
+rules or a new module across, restart the task, then do one lookup and check
+the sheet reflects the change. The server script carries the API token, so
+never copy the repo's `Start-RefreshAppServer.ps1` over the live one without
+pasting the token back in; the placeholder in the serial box (`SN1A2B3`) is
+set on the live copy and mirrored here.
+
+As of 22 Sep 2026 the repo holds **121 rules** (13 added from a real refresh:
+inbox Store apps, Remote Help, and the Adobe component that installs with
+Acrobat) and `Explain-AppRule.ps1`. If the lab machine predates that, copy
+`AppRules.csv` across and restart the task. `Explain-AppRule.ps1` is offline
+and optional there - it needs only the module and the rules beside it.
+
 ### What is deliberately not done
 
 - **Authorization.** Any domain account that reaches the port is served. An
