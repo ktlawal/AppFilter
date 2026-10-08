@@ -118,6 +118,11 @@ $SecretKey = "KEY HERE"
 
 $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
+
+#  The team mailbox shown as the support contact at the bottom of the left
+#  panel. Left as the placeholder (or not a plain address), only the
+#  "Product of Endpoint Management Team" line shows.
+$SupportEmail = "SUPPORT EMAIL HERE"
 # -------------------------------------------------------------------
 
 Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Stop
@@ -138,10 +143,18 @@ $PageCss = @'
      and pushed to the inner edge, so on a wide monitor the two halves read as
      one composition across the divider instead of drifting to opposite walls.
      The text inside stays left-aligned; only the block moves. */
-  .left { background: #22254e; color: #fff; padding: 46px 56px 46px 40px;
+  .left { position: relative; background: #22254e; color: #fff; padding: 46px 56px 46px 40px;
           display: flex; flex-direction: column; justify-content: center;
           align-items: flex-end; }
-  .left .inner { max-width: 34ch; }
+  .left .inner { width: 34ch; max-width: 100%; }
+  /* Branding and support along the bottom of the panel, lined up with the
+     text above: the same width in the same ch, so the small size goes on the
+     lines inside rather than on the box. */
+  .panel-foot { position: absolute; right: 56px; bottom: 30px; width: 34ch;
+                max-width: calc(100% - 96px); }
+  .panel-foot div { font-size: 12.5px; line-height: 1.6; color: #94a3b8; }
+  .panel-foot div.brand { font-weight: 600; color: #cbd5e1; }
+  .panel-foot a { color: #7dd3fc; }
   .mark { font-size: 12px; font-weight: 600; letter-spacing: .14em;
           text-transform: uppercase; color: #7dd3fc; }
   .left h2 { font-size: 26px; font-weight: 600; letter-spacing: -.02em;
@@ -185,12 +198,27 @@ $PageCss = @'
     body { grid-template-columns: minmax(0,1fr); grid-template-rows: auto 1fr; }
     /* Stacked, there is no divider to hug: both go back to the left margin. */
     .left { padding: 28px 24px; align-items: stretch; }
+    .left .inner { width: auto; }
+    .panel-foot { position: static; width: auto; max-width: none; margin-top: 16px; }
     .left h2 { font-size: 21px; }
     .left p { display: none; }
     .right { padding: 32px 24px; justify-items: stretch; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 '@
+
+function Format-PanelFoot {
+    # "Product of Endpoint Management Team", and the support mailbox from
+    # $SupportEmail when it holds a plain address - nothing else can reach the
+    # page or the mailto: link.
+    $support = ''
+    $mail = ([string]$SupportEmail).Trim()
+    if ($mail -cmatch '^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\z') {
+        $mail = ConvertTo-HtmlText $mail
+        $support = "<div>Support: <a href=`"mailto:$mail`?subject=Refresh%20App%20List`">$mail</a></div>"
+    }
+    "    <div class=`"panel-foot`"><div class=`"brand`">Product of Endpoint Management Team</div>$support</div>`n"
+}
 
 function New-SplitPage {
     <#
@@ -215,7 +243,7 @@ function New-SplitPage {
       <h2>What to install<br />on the new device</h2>
       <p>Pulls the old device's inventory and subtracts everything the image already provides.</p>
     </div>
-  </div>
+$(Format-PanelFoot)  </div>
   <div class="right">
     <div class="form">
 $Body

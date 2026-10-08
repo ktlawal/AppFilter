@@ -765,7 +765,10 @@ running and idle. Task Scheduler's "Last Run Result" is the other signal.
 ### Standing it up on the lab machine
 
 1. Copy `AppFilter.psm1`, `AppRules.csv` and `Start-RefreshAppServer.ps1` to
-   the machine and fill in the token at the top of the server script.
+   the machine and fill in the token at the top of the server script, and
+   `$SupportEmail` beside it: the team mailbox shown under "Product of
+   Endpoint Management Team" at the bottom of the left panel (left as the
+   placeholder, only the branding line shows).
 2. Reserve the URL once, so it does not need an elevated session to run:
    `netsh http add urlacl url=http://+:5000/appfilter/ user=DOMAIN\ServiceAccount`
    (or `user="NT AUTHORITY\SYSTEM"` if the startup task runs as SYSTEM). The

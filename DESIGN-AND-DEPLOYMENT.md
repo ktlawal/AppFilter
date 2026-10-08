@@ -846,7 +846,7 @@ Placeholders: `<lab-machine>.<domain>`, `<thumbprint>`, `<guid>`.
 
 ```powershell
 # 1. Files on the machine: AppFilter.psm1, AppRules.csv, Start-RefreshAppServer.ps1
-#    with the token filled in at the top of the server script.
+#    with the token and $SupportEmail filled in at the top of the server script.
 
 # 2. Reserve the URL for the account that will run it
 netsh http add urlacl url=https://+:5000/appfilter/ user="NT AUTHORITY\SYSTEM"
