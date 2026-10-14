@@ -60,26 +60,17 @@ param(
 
     # Where the Absolute token (and, for the web front end, the support
     # email) live on the lab machine, outside the code folder. If the file is
-    # not there, the values below and then the environment are used.
+    # not there, the ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY environment
+    # variables are used.
     [string]$ConfigPath = 'C:\ProgramData\AppFilter\config.json'
 )
 
 # --- CONFIGURATION -------------------------------------------------
 #
-#  >> THIS FILE CONTAINS THE ABSOLUTE API KEY. <<
+#  The Absolute API key is not in this file. It comes from the config file
+#  (-ConfigPath), or failing that the ABSOLUTE_TOKEN_ID and
+#  ABSOLUTE_SECRET_KEY environment variables.
 #
-#  Anyone who has this file has the key, and it works from any internet
-#  connection unless the token is restricted to approved IP addresses in the
-#  Absolute console. Do not screen-share it, attach it to a ticket, or commit
-#  it anywhere. Rotating the key means redistributing this file to everyone.
-#
-#  The config file (-ConfigPath) wins when it holds both values. Leave these
-#  as-is and, without a config file, the script falls back to the
-#  ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY environment variables.
-#
-$TokenId   = "TOKEN HERE"
-$SecretKey = "KEY HERE"
-
 $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
 # -------------------------------------------------------------------
@@ -92,7 +83,7 @@ Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Sto
 # ------------------------------------------------------------------
 $rules      = Import-AppRule -Path $RulesCsv
 $config     = Import-AppFilterConfig -Path $ConfigPath
-$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey -Config $config
+$credential = Get-AbsoluteCredential -Config $config
 Write-Verbose "Credential loaded from $($credential.Source)."
 
 if (-not $Serial -and -not $DeviceName) {

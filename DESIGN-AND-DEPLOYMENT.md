@@ -176,10 +176,12 @@ without becoming a secret.
 
 ## 6. Decide where the API key lives
 
-**Done:** The token ID and secret are pasted into the top of each front end,
-with `ABSOLUTE_TOKEN_ID` / `ABSOLUTE_SECRET_KEY` environment variables as a
-fallback when the in-file values are left as placeholders. Values in the file
-win when filled in.
+**Done (Oct 2026):** The token ID and secret live in
+`C:\ProgramData\AppFilter\config.json`, readable only by SYSTEM and
+Administrators, with `ABSOLUTE_TOKEN_ID` / `ABSOLUTE_SECRET_KEY` environment
+variables as the fallback when there is no config file. The front ends no
+longer hold the key. Before that, the values were pasted into the top of each
+front end; what follows describes that period.
 
 **For:** The tool had to be usable before a shared-credential story existed.
 

@@ -77,8 +77,7 @@ function Import-AppFilterConfig {
         outside the code folder, so copying in new code never overwrites them.
 
         Returns $null when there is no file: the front ends then fall back to
-        the values at the top of the script, or the environment, as before.
-        A file that exists but cannot be read stops the script with the reason,
+        the environment. A file that exists but cannot be read stops the script with the reason,
         rather than silently falling back to something else.
     #>
     param([string]$Path)
@@ -102,18 +101,16 @@ function Get-AbsoluteCredential {
         Returns the token ID and secret for this run, from the first of:
 
           1. the config file (Import-AppFilterConfig), when it has both values
-          2. the values at the top of the script, when they have been filled in
-          3. ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY in the environment
+          2. ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY in the environment
 
-        The config file comes first because it is where the key is meant to
-        live on the lab machine: outside the code folder, readable only by
-        SYSTEM and Administrators. The script values still beat the
-        environment, so a recipient's leftover environment variables do not
-        quietly take over from the copy they were given.
+        The config file is where the key is meant to live on the lab machine:
+        outside the code folder, readable only by SYSTEM and Administrators.
+        The scripts themselves hold no key, so copying in new code never
+        touches it.
 
-        .Source says which one answered: 'config', 'script' or 'environment'.
+        .Source says which one answered: 'config' or 'environment'.
     #>
-    param([string]$TokenId, [string]$SecretKey, $Config)
+    param($Config)
 
     $placeholder = @('TOKEN HERE', 'KEY HERE')
 
@@ -124,16 +121,6 @@ function Get-AbsoluteCredential {
             TokenId   = $Config.TokenId
             SecretKey = $Config.SecretKey
             Source    = 'config'
-        }
-    }
-
-    if ($TokenId -and $SecretKey -and
-        $TokenId   -notin $placeholder -and
-        $SecretKey -notin $placeholder) {
-        return [pscustomobject]@{
-            TokenId   = $TokenId.Trim()
-            SecretKey = $SecretKey.Trim()
-            Source    = 'script'
         }
     }
 
@@ -151,11 +138,6 @@ No Absolute credential found.
 Put them in the config file (C:\ProgramData\AppFilter\config.json):
 
     { "TokenId": "...", "SecretKey": "..." }
-
-or fill in the two values at the top of this script:
-
-    `$TokenId   = "..."
-    `$SecretKey = "..."
 
 or set them in the environment instead:
 

@@ -98,32 +98,26 @@ param(
     # Without that binding the listener starts and every connection is reset.
     [switch]$UseHttps,
 
-    [string]$LogPath = "$PSScriptRoot\RefreshAppServer.log",
+    # Defaults to RefreshAppServer.log next to this script (set below).
+    [string]$LogPath,
 
     # Where the Absolute token (and, for the web front end, the support
     # email) live on the lab machine, outside the code folder. If the file is
-    # not there, the values below and then the environment are used.
+    # not there, the ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY environment
+    # variables are used.
     [string]$ConfigPath = 'C:\ProgramData\AppFilter\config.json'
 )
 
 # --- CONFIGURATION -------------------------------------------------
 #
-#  >> THIS FILE CONTAINS THE ABSOLUTE API KEY. <<
+#  The Absolute API key is not in this file. It lives in the config file
+#  (-ConfigPath, by default C:\ProgramData\AppFilter\config.json), readable
+#  only by SYSTEM and Administrators, so copying in a new version of this
+#  script never touches it and technicians never hold a copy. Without a
+#  config file, the ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY environment
+#  variables are used. Set Approved IP Addresses on the token in the
+#  Absolute console so the key is useless anywhere but this machine.
 #
-#  On a server that is the point: the key lives here and nowhere else, so
-#  technicians never hold a copy. Restrict who can log into this machine,
-#  and set Approved IP Addresses on the token in the Absolute console so the
-#  key is useless anywhere but here.
-#
-#  Better: put them in the config file (-ConfigPath, by default
-#  C:\ProgramData\AppFilter\config.json), which wins when it holds both
-#  values. Then copying in a new version of this script never overwrites the
-#  key. Leave these as-is and, without a config file, the ABSOLUTE_TOKEN_ID
-#  and ABSOLUTE_SECRET_KEY environment variables are used instead.
-#
-$TokenId   = "TOKEN HERE"
-$SecretKey = "KEY HERE"
-
 $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
 
@@ -133,6 +127,12 @@ $PageSize  = 500
 #  Management Team" line shows.
 $SupportEmail = "SUPPORT EMAIL HERE"
 # -------------------------------------------------------------------
+
+# Windows PowerShell 5.1 can leave $PSScriptRoot empty while it binds
+# parameter defaults, so a default of "$PSScriptRoot\x" becomes "\x" - the
+# root of the drive. The log's default is filled in here, in the body, where
+# $PSScriptRoot is always set.
+if (-not $LogPath) { $LogPath = Join-Path $PSScriptRoot 'RefreshAppServer.log' }
 
 Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Stop
 
@@ -381,7 +381,7 @@ catch {
     Write-ServerLog "FAILED TO START (config) - $($_.Exception.Message)"
     exit 1
 }
-$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey -Config $config
+$credential = Get-AbsoluteCredential -Config $config
 if ($config -and $config.SupportEmail -and $config.SupportEmail -ne 'SUPPORT EMAIL HERE') {
     $SupportEmail = $config.SupportEmail
 }

@@ -325,8 +325,8 @@ Assert-Envelope 'footer count stands'   ($shPlain -match '4 of 5 inventoried app
 
 Write-Host "`nConfig file and credential source" -ForegroundColor Cyan
 # The token lives in C:\ProgramData\AppFilter\config.json on the lab machine,
-# so new code never overwrites it. Order: config, then the script's values,
-# then the environment. A config that is there but broken stops the script.
+# so new code never overwrites it. Order: config, then the environment. A
+# config that is there but broken stops the script.
 $savedId = $env:ABSOLUTE_TOKEN_ID; $savedKey = $env:ABSOLUTE_SECRET_KEY
 $cfgDir = Join-Path ([IO.Path]::GetTempPath()) ("appfilter-cfg-" + [Guid]::NewGuid().ToString('n'))
 New-Item -ItemType Directory -Path $cfgDir | Out-Null
@@ -335,14 +335,13 @@ try {
     $env:ABSOLUTE_TOKEN_ID = 'env-id'; $env:ABSOLUTE_SECRET_KEY = 'env-key'
 
     Assert-Envelope 'no file: no config'        ($null -eq (Import-AppFilterConfig -Path $cfgPath)) 'True'
-    Assert-Envelope 'no file: script values'    (Get-AbsoluteCredential -TokenId 'scr-id' -SecretKey 'scr-key' -Config $null).Source 'script'
-    Assert-Envelope 'no file, no script: env'   (Get-AbsoluteCredential -TokenId 'TOKEN HERE' -SecretKey 'KEY HERE' -Config $null).Source 'environment'
+    Assert-Envelope 'no file: environment'      (Get-AbsoluteCredential -Config $null).Source 'environment'
 
     '{ "TokenId": "cfg-id", "SecretKey": "cfg-key", "SupportEmail": "team@example.org" }' |
         Set-Content -LiteralPath $cfgPath -Encoding UTF8
     $cfg = Import-AppFilterConfig -Path $cfgPath
-    $cred = Get-AbsoluteCredential -TokenId 'scr-id' -SecretKey 'scr-key' -Config $cfg
-    Assert-Envelope 'config wins over script'   $cred.Source    'config'
+    $cred = Get-AbsoluteCredential -Config $cfg
+    Assert-Envelope 'config wins over env'      $cred.Source    'config'
     Assert-Envelope 'config token id'           $cred.TokenId   'cfg-id'
     Assert-Envelope 'config secret'             $cred.SecretKey 'cfg-key'
     Assert-Envelope 'config support email'      $cfg.SupportEmail 'team@example.org'
@@ -350,11 +349,16 @@ try {
     '{ "TokenId": "TOKEN HERE", "SecretKey": "KEY HERE", "SupportEmail": "team@example.org" }' |
         Set-Content -LiteralPath $cfgPath -Encoding UTF8
     $cfg = Import-AppFilterConfig -Path $cfgPath
-    Assert-Envelope 'placeholder config skipped' (Get-AbsoluteCredential -TokenId 'scr-id' -SecretKey 'scr-key' -Config $cfg).Source 'script'
+    Assert-Envelope 'placeholder config skipped' (Get-AbsoluteCredential -Config $cfg).Source 'environment'
 
     '{ "SupportEmail": "team@example.org" }' | Set-Content -LiteralPath $cfgPath -Encoding UTF8
     $cfg = Import-AppFilterConfig -Path $cfgPath
-    Assert-Envelope 'email-only config: env'    (Get-AbsoluteCredential -TokenId 'TOKEN HERE' -SecretKey 'KEY HERE' -Config $cfg).Source 'environment'
+    Assert-Envelope 'email-only config: env'    (Get-AbsoluteCredential -Config $cfg).Source 'environment'
+
+    $env:ABSOLUTE_TOKEN_ID = $null; $env:ABSOLUTE_SECRET_KEY = $null
+    $threw = $false
+    try { [void](Get-AbsoluteCredential -Config $null) } catch { $threw = $_.Exception.Message -like '*No Absolute credential found*' }
+    Assert-Envelope 'no config, no env: stops'  $threw 'True'
 
     # A missing comma between lines: the mistake people actually make.
     '{ "TokenId": "cfg-id" "SecretKey": "cfg-key" }' | Set-Content -LiteralPath $cfgPath -Encoding UTF8
@@ -366,6 +370,21 @@ finally {
     $env:ABSOLUTE_TOKEN_ID = $savedId; $env:ABSOLUTE_SECRET_KEY = $savedKey
     Remove-Item -LiteralPath $cfgDir -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# No front end may carry the key in its own text any more.
+foreach ($front in 'Start-RefreshAppServer.ps1', 'Get-RefreshAppList.ps1', 'Debug-AbsoluteLookup.ps1') {
+    $text = Get-Content -LiteralPath (Join-Path $PSScriptRoot $front) -Raw
+    Assert-Envelope "no key in $front"          ($text -match '\$SecretKey\s*=') 'False'
+}
+
+Write-Host "`nLog path default" -ForegroundColor Cyan
+# Under Windows PowerShell 5.1 $PSScriptRoot can be empty while parameter
+# defaults bind, which put the log at the root of the drive. The default is
+# filled in in the script body instead.
+$serverAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $PSScriptRoot 'Start-RefreshAppServer.ps1'), [ref]$null, [ref]$null)
+$logParam = @($serverAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'LogPath' })[0]
+Assert-Envelope 'LogPath has no param default' ($null -eq $logParam.DefaultValue) 'True'
 
 Write-Host ""
 if ($failures -eq 0) { Write-Host "All cases passed." -ForegroundColor Green }

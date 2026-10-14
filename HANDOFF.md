@@ -29,8 +29,8 @@ installs (Intune group membership) is a possible later phase.
 only by SYSTEM and Administrators. All three front ends - the web server,
 `Get-RefreshAppList.ps1` and `Debug-AbsoluteLookup.ps1` - read it first
 (`-ConfigPath` to point elsewhere), so copying in new code never overwrites the
-key. The order is: config file, then the values at the top of the script, then
-the environment. A config file that exists but is not valid JSON stops the
+key. The scripts themselves no longer hold the key. The order is: config file,
+then the environment. A config file that exists but is not valid JSON stops the
 script with the reason. The server's `STARTED` line records which source
 answered (`credential=config`), the config path and the support email. The
 shape is in `config.example.json`:
@@ -43,19 +43,12 @@ shape is in `config.example.json`:
 }
 ```
 
-What follows describes the script-values route, which still works where there
-is no config file.
+Where there is no config file, `ABSOLUTE_TOKEN_ID` and `ABSOLUTE_SECRET_KEY`
+from the environment are used. `-Verbose` on `Get-RefreshAppList.ps1` reports
+which source answered. (Until Oct 2026 the key could also be pasted into the
+top of each front end; that route was removed so the key has one home.)
 
-The token ID and secret are pasted into the top of each front end —
-`Get-RefreshAppList.ps1` and `Start-RefreshAppServer.ps1` — and handed to the
-module as parameters. If those are left as the `TOKEN HERE` / `KEY HERE`
-placeholders, the script falls back to `ABSOLUTE_TOKEN_ID` and
-`ABSOLUTE_SECRET_KEY` from the environment — which is how a server or scheduled task would supply it without
-the file carrying the key.
-
-The values in the file win when they are filled in. A recipient's leftover
-environment variables should not quietly take over from the copy the
-distributor intended them to use. `-Verbose` reports which source answered.
+What follows is the history of where the key lived before the config file.
 
 **This is a deliberate step back, taken so the tool can be handed to the team
 before a shared-credential story exists.** Everything below applies to handing

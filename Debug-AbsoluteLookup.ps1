@@ -8,7 +8,7 @@
     that produce that message and look identical from the outside:
 
       1. the credential is for a different tenant, or a stale environment
-         variable is being used instead of the one in the script
+         variable is being used because there is no config file
       2. the token cannot read devices at all
       3. the token is fine and the serial genuinely is not there
 
@@ -28,16 +28,14 @@ param(
 
     # Where the Absolute token (and, for the web front end, the support
     # email) live on the lab machine, outside the code folder. If the file is
-    # not there, the values below and then the environment are used.
+    # not there, the ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY environment
+    # variables are used.
     [string]$ConfigPath = 'C:\ProgramData\AppFilter\config.json'
 )
 
-# The config file (-ConfigPath) is used first when it holds both values.
-# Otherwise paste the same values you put in Get-RefreshAppList.ps1, or leave
-# them and the environment variables are used - which is one of the things
-# being tested.
-$TokenId   = "TOKEN HERE"
-$SecretKey = "KEY HERE"
+# The key comes from the config file (-ConfigPath) or, failing that, the
+# environment variables - which source answered is one of the things being
+# tested.
 $BaseUrl   = "https://api.absolute.com"
 
 Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Stop
@@ -83,7 +81,7 @@ Write-Host ""
 Write-Host "  PowerShell    $($PSVersionTable.PSVersion)  ($($PSVersionTable.PSEdition))"
 
 $config     = Import-AppFilterConfig -Path $ConfigPath
-$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey -Config $config
+$credential = Get-AbsoluteCredential -Config $config
 
 # Which credential answered matters more than it looks: a valid token for the
 # wrong tenant authenticates cleanly and then matches no devices at all.
@@ -97,7 +95,7 @@ $secretLength = ([string]$credential.SecretKey).Length
 Write-Host "  Secret        $secretLength characters" -ForegroundColor DarkGray
 
 if ($credential.Source -eq 'environment') {
-    Write-Warning "Using ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY from the environment, not the values in this file."
+    Write-Warning "Using ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY from the environment: no config file at $ConfigPath."
     Write-Warning "If those are left over from earlier testing they may point at a different account."
 }
 
