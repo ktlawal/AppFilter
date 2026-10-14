@@ -98,7 +98,12 @@ param(
     # Without that binding the listener starts and every connection is reset.
     [switch]$UseHttps,
 
-    [string]$LogPath = "$PSScriptRoot\RefreshAppServer.log"
+    [string]$LogPath = "$PSScriptRoot\RefreshAppServer.log",
+
+    # Where the Absolute token (and, for the web front end, the support
+    # email) live on the lab machine, outside the code folder. If the file is
+    # not there, the values below and then the environment are used.
+    [string]$ConfigPath = 'C:\ProgramData\AppFilter\config.json'
 )
 
 # --- CONFIGURATION -------------------------------------------------
@@ -110,8 +115,11 @@ param(
 #  and set Approved IP Addresses on the token in the Absolute console so the
 #  key is useless anywhere but here.
 #
-#  Leave these as-is to use the ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY
-#  environment variables instead.
+#  Better: put them in the config file (-ConfigPath, by default
+#  C:\ProgramData\AppFilter\config.json), which wins when it holds both
+#  values. Then copying in a new version of this script never overwrites the
+#  key. Leave these as-is and, without a config file, the ABSOLUTE_TOKEN_ID
+#  and ABSOLUTE_SECRET_KEY environment variables are used instead.
 #
 $TokenId   = "TOKEN HERE"
 $SecretKey = "KEY HERE"
@@ -120,8 +128,9 @@ $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
 
 #  The team mailbox shown as the support contact at the bottom of the left
-#  panel. Left as the placeholder (or not a plain address), only the
-#  "Product of Endpoint Management Team" line shows.
+#  panel. "SupportEmail" in the config file wins over this. Left as the
+#  placeholder (or not a plain address), only the "Product of Endpoint
+#  Management Team" line shows.
 $SupportEmail = "SUPPORT EMAIL HERE"
 # -------------------------------------------------------------------
 
@@ -364,7 +373,18 @@ if ($Anonymous -and $BindAddress -notin @('localhost', '127.0.0.1', '::1') -and
 }
 
 $rules      = Import-AppRule -Path $RulesCsv
-$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey
+try { $config = Import-AppFilterConfig -Path $ConfigPath }
+catch {
+    # A config file that is there but unreadable must stop the server with the
+    # reason in the log, not fall back quietly to something else.
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-ServerLog "FAILED TO START (config) - $($_.Exception.Message)"
+    exit 1
+}
+$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey -Config $config
+if ($config -and $config.SupportEmail -and $config.SupportEmail -ne 'SUPPORT EMAIL HERE') {
+    $SupportEmail = $config.SupportEmail
+}
 
 # A prefix has to start and end with a slash or http.sys rejects it.
 $BasePath = '/' + $BasePath.Trim('/') + '/'
@@ -486,9 +506,13 @@ if ($Anonymous -and $BindAddress -notin @('localhost', '127.0.0.1', '::1')) {
     Write-ServerLog "WARNING  serving anonymously on $BindAddress - no sign-in required"
 }
 
-Write-ServerLog ("STARTED  {0}://{1}:{2}{3}  auth={4}  credential={5}  rules={6}  pid={7}" -f
+$configShown = '(none)'
+if ($config) { $configShown = $config.Path }
+$supportShown = '(none)'
+if (([string]$SupportEmail).Trim() -cmatch '^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\z') { $supportShown = $SupportEmail.Trim() }
+Write-ServerLog ("STARTED  {0}://{1}:{2}{3}  auth={4}  credential={5}  config={6}  support={7}  rules={8}  pid={9}" -f
                  $scheme, $BindAddress, $Port, $BasePath, $authLabel,
-                 $credential.Source,
+                 $credential.Source, $configShown, $supportShown,
                  ($rules.Names.Count + $rules.Publishers.Count + $rules.Patterns.Count),
                  $PID)
 

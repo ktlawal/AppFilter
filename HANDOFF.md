@@ -24,6 +24,28 @@ installs (Intune group membership) is a possible later phase.
 
 ## Credentials
 
+**On the lab machine the token now lives in a config file** (Oct 2026):
+`C:\ProgramData\AppFilter\config.json`, outside the code folder and readable
+only by SYSTEM and Administrators. All three front ends - the web server,
+`Get-RefreshAppList.ps1` and `Debug-AbsoluteLookup.ps1` - read it first
+(`-ConfigPath` to point elsewhere), so copying in new code never overwrites the
+key. The order is: config file, then the values at the top of the script, then
+the environment. A config file that exists but is not valid JSON stops the
+script with the reason. The server's `STARTED` line records which source
+answered (`credential=config`), the config path and the support email. The
+shape is in `config.example.json`:
+
+```json
+{
+  "TokenId":      "<token id>",
+  "SecretKey":    "<secret>",
+  "SupportEmail": "<team-mailbox>@<domain>"
+}
+```
+
+What follows describes the script-values route, which still works where there
+is no config file.
+
 The token ID and secret are pasted into the top of each front end —
 `Get-RefreshAppList.ps1` and `Start-RefreshAppServer.ps1` — and handed to the
 module as parameters. If those are left as the `TOKEN HERE` / `KEY HERE`
@@ -765,10 +787,12 @@ running and idle. Task Scheduler's "Last Run Result" is the other signal.
 ### Standing it up on the lab machine
 
 1. Copy `AppFilter.psm1`, `AppRules.csv` and `Start-RefreshAppServer.ps1` to
-   the machine and fill in the token at the top of the server script, and
-   `$SupportEmail` beside it: the team mailbox shown under "Product of
-   Endpoint Management Team" at the bottom of the left panel (left as the
-   placeholder, only the branding line shows).
+   the machine. Put the token and the support email in
+   `C:\ProgramData\AppFilter\config.json` (see Credentials), in a folder only
+   SYSTEM and Administrators can read:
+   `icacls C:\ProgramData\AppFilter /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"`.
+   The support email is shown under "Product of Endpoint Management Team" at
+   the bottom of the left panel; left out, only the branding line shows.
 2. Reserve the URL once, so it does not need an elevated session to run:
    `netsh http add urlacl url=http://+:5000/appfilter/ user=DOMAIN\ServiceAccount`
    (or `user="NT AUTHORITY\SYSTEM"` if the startup task runs as SYSTEM). The

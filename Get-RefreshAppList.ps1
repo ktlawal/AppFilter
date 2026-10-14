@@ -56,7 +56,12 @@ param(
     # <serial>-InstallList.html unless a path is given here or -NoSheet is set.
     [string]$OutputHtml,
 
-    [switch]$NoSheet
+    [switch]$NoSheet,
+
+    # Where the Absolute token (and, for the web front end, the support
+    # email) live on the lab machine, outside the code folder. If the file is
+    # not there, the values below and then the environment are used.
+    [string]$ConfigPath = 'C:\ProgramData\AppFilter\config.json'
 )
 
 # --- CONFIGURATION -------------------------------------------------
@@ -68,8 +73,9 @@ param(
 #  Absolute console. Do not screen-share it, attach it to a ticket, or commit
 #  it anywhere. Rotating the key means redistributing this file to everyone.
 #
-#  Leave these as-is and the script falls back to the ABSOLUTE_TOKEN_ID and
-#  ABSOLUTE_SECRET_KEY environment variables instead.
+#  The config file (-ConfigPath) wins when it holds both values. Leave these
+#  as-is and, without a config file, the script falls back to the
+#  ABSOLUTE_TOKEN_ID and ABSOLUTE_SECRET_KEY environment variables.
 #
 $TokenId   = "TOKEN HERE"
 $SecretKey = "KEY HERE"
@@ -85,7 +91,8 @@ Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Sto
 #  Rules and credentials, before the operator is asked to type anything
 # ------------------------------------------------------------------
 $rules      = Import-AppRule -Path $RulesCsv
-$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey
+$config     = Import-AppFilterConfig -Path $ConfigPath
+$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey -Config $config
 Write-Verbose "Credential loaded from $($credential.Source)."
 
 if (-not $Serial -and -not $DeviceName) {

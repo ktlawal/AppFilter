@@ -24,11 +24,18 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [string]$Serial = '4QXTTHR3'
+    [string]$Serial = '4QXTTHR3',
+
+    # Where the Absolute token (and, for the web front end, the support
+    # email) live on the lab machine, outside the code folder. If the file is
+    # not there, the values below and then the environment are used.
+    [string]$ConfigPath = 'C:\ProgramData\AppFilter\config.json'
 )
 
-# Paste the same values you put in Get-RefreshAppList.ps1, or leave them and
-# the environment variables are used - which is one of the things being tested.
+# The config file (-ConfigPath) is used first when it holds both values.
+# Otherwise paste the same values you put in Get-RefreshAppList.ps1, or leave
+# them and the environment variables are used - which is one of the things
+# being tested.
 $TokenId   = "TOKEN HERE"
 $SecretKey = "KEY HERE"
 $BaseUrl   = "https://api.absolute.com"
@@ -75,7 +82,8 @@ Write-Host ("=" * 70)
 Write-Host ""
 Write-Host "  PowerShell    $($PSVersionTable.PSVersion)  ($($PSVersionTable.PSEdition))"
 
-$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey
+$config     = Import-AppFilterConfig -Path $ConfigPath
+$credential = Get-AbsoluteCredential -TokenId $TokenId -SecretKey $SecretKey -Config $config
 
 # Which credential answered matters more than it looks: a valid token for the
 # wrong tenant authenticates cleanly and then matches no devices at all.

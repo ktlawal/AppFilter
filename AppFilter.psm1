@@ -70,20 +70,62 @@ function ConvertTo-Base64Url {
     [Convert]::ToBase64String($Bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
+function Import-AppFilterConfig {
+    <#
+        Reads the optional config file - C:\ProgramData\AppFilter\config.json
+        by default - that holds the Absolute token and the support email
+        outside the code folder, so copying in new code never overwrites them.
+
+        Returns $null when there is no file: the front ends then fall back to
+        the values at the top of the script, or the environment, as before.
+        A file that exists but cannot be read stops the script with the reason,
+        rather than silently falling back to something else.
+    #>
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try {
+        $cfg = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Config file $Path could not be read: $($_.Exception.Message) - check the JSON (backslashes doubled, commas between lines)."
+    }
+    [pscustomobject]@{
+        Path         = $Path
+        TokenId      = ([string](Get-DataProperty $cfg 'TokenId')).Trim()
+        SecretKey    = ([string](Get-DataProperty $cfg 'SecretKey')).Trim()
+        SupportEmail = ([string](Get-DataProperty $cfg 'SupportEmail')).Trim()
+    }
+}
+
 function Get-AbsoluteCredential {
     <#
-        Returns the token ID and secret for this run.
+        Returns the token ID and secret for this run, from the first of:
 
-        The values at the top of this file win when they have been filled in.
-        A recipient's leftover environment variables should not quietly take
-        over from the copy the distributor intended them to use.
+          1. the config file (Import-AppFilterConfig), when it has both values
+          2. the values at the top of the script, when they have been filled in
+          3. ABSOLUTE_TOKEN_ID / ABSOLUTE_SECRET_KEY in the environment
 
-        Environment variables are the fallback, so a server or scheduled task
-        can supply the key without this file carrying it.
+        The config file comes first because it is where the key is meant to
+        live on the lab machine: outside the code folder, readable only by
+        SYSTEM and Administrators. The script values still beat the
+        environment, so a recipient's leftover environment variables do not
+        quietly take over from the copy they were given.
+
+        .Source says which one answered: 'config', 'script' or 'environment'.
     #>
-    param([string]$TokenId, [string]$SecretKey)
+    param([string]$TokenId, [string]$SecretKey, $Config)
 
     $placeholder = @('TOKEN HERE', 'KEY HERE')
+
+    if ($Config -and $Config.TokenId -and $Config.SecretKey -and
+        $Config.TokenId   -notin $placeholder -and
+        $Config.SecretKey -notin $placeholder) {
+        return [pscustomobject]@{
+            TokenId   = $Config.TokenId
+            SecretKey = $Config.SecretKey
+            Source    = 'config'
+        }
+    }
 
     if ($TokenId -and $SecretKey -and
         $TokenId   -notin $placeholder -and
@@ -106,7 +148,11 @@ function Get-AbsoluteCredential {
     throw @"
 No Absolute credential found.
 
-Either fill in the two values at the top of this script:
+Put them in the config file (C:\ProgramData\AppFilter\config.json):
+
+    { "TokenId": "...", "SecretKey": "..." }
+
+or fill in the two values at the top of this script:
 
     `$TokenId   = "..."
     `$SecretKey = "..."
@@ -884,7 +930,8 @@ function Get-RefreshApps {
 
 Export-ModuleMember -Function ConvertTo-NormalizedAppName, ConvertTo-NormalizedPublisher,
                               Import-AppRule, Get-AppClassification, Add-AppRule,
-                              Get-AbsoluteCredential, Invoke-AbsoluteApi, Get-AbsoluteV3,
+                              Get-AbsoluteCredential, Import-AppFilterConfig,
+                              Invoke-AbsoluteApi, Get-AbsoluteV3,
                               Get-RefreshApps, New-InstallSheetHtml, ConvertTo-HtmlText,
                               Save-InstallSheet, Read-IndexSelection, ConvertTo-Base64Url,
                               Get-DataProperty, Get-PageData, Get-NextPageToken,
