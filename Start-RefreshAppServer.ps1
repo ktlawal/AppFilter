@@ -65,8 +65,9 @@ param(
     # machine, which also avoids needing a URL reservation.
     [string]$BindAddress = '+',
 
+    # Defaults to AppRules.csv next to this script (set below).
     [Alias('BaselineCsv')]
-    [string]$RulesCsv = "$PSScriptRoot\AppRules.csv",
+    [string]$RulesCsv,
 
     # Turn off Windows authentication. Only sensible for a local trial.
     [switch]$Anonymous,
@@ -130,8 +131,9 @@ $SupportEmail = "SUPPORT EMAIL HERE"
 
 # Windows PowerShell 5.1 can leave $PSScriptRoot empty while it binds
 # parameter defaults, so a default of "$PSScriptRoot\x" becomes "\x" - the
-# root of the drive. The log's default is filled in here, in the body, where
+# root of the drive. Those defaults are filled in here, in the body, where
 # $PSScriptRoot is always set.
+if (-not $RulesCsv) { $RulesCsv = Join-Path $PSScriptRoot 'AppRules.csv' }
 if (-not $LogPath) { $LogPath = Join-Path $PSScriptRoot 'RefreshAppServer.log' }
 
 Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Stop

@@ -52,7 +52,8 @@ param(
     [Parameter(ParameterSetName = 'Summary')]
     [switch]$Summary,
 
-    [string]$RulesCsv = "$PSScriptRoot\AppRules.csv",
+    # Defaults to AppRules.csv next to this script (set in begin).
+    [string]$RulesCsv,
 
     # One line per application instead of the full walk-through - for checking
     # a handful at once.
@@ -67,6 +68,9 @@ param(
 )
 
 begin {
+    # Windows PowerShell 5.1 can leave $PSScriptRoot empty while it binds
+    # parameter defaults, so the default is filled in here instead.
+    if (-not $RulesCsv) { $RulesCsv = Join-Path $PSScriptRoot 'AppRules.csv' }
     $module = Join-Path $PSScriptRoot 'AppFilter.psm1'
     if (-not (Test-Path $module))   { throw "Cannot find AppFilter.psm1 next to this script." }
     if (-not (Test-Path $RulesCsv)) { throw "Cannot find rules file: $RulesCsv" }

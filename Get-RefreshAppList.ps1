@@ -48,8 +48,9 @@ param(
     # Skip the "add these to the base image?" prompt and never touch the CSV
     [switch]$NoPrompt,
 
+    # Defaults to AppRules.csv next to this script (set below).
     [Alias('BaselineCsv')]
-    [string]$RulesCsv = "$PSScriptRoot\AppRules.csv",
+    [string]$RulesCsv,
     [string]$OutputCsv,
 
     # Printable tick-list for the bench. Written to the current directory as
@@ -74,6 +75,12 @@ param(
 $BaseUrl   = "https://api.absolute.com"
 $PageSize  = 500
 # -------------------------------------------------------------------
+
+# Windows PowerShell 5.1 can leave $PSScriptRoot empty while it binds
+# parameter defaults, so a default of "$PSScriptRoot\x" becomes "\x" - the
+# root of the drive. The default is filled in here, in the body, where
+# $PSScriptRoot is always set.
+if (-not $RulesCsv) { $RulesCsv = Join-Path $PSScriptRoot 'AppRules.csv' }
 
 Import-Module (Join-Path $PSScriptRoot 'AppFilter.psm1') -Force -ErrorAction Stop
 

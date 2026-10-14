@@ -14,7 +14,13 @@
 #>
 
 [CmdletBinding()]
-param([string]$RulesCsv = "$PSScriptRoot\AppRules.csv")
+param([string]$RulesCsv)
+
+# Windows PowerShell 5.1 can leave $PSScriptRoot empty while it binds
+# parameter defaults, so a default of "$PSScriptRoot\x" becomes "\x" - the
+# root of the drive. The default is filled in here, in the body, where
+# $PSScriptRoot is always set.
+if (-not $RulesCsv) { $RulesCsv = Join-Path $PSScriptRoot 'AppRules.csv' }
 
 $module = Join-Path $PSScriptRoot 'AppFilter.psm1'
 if (-not (Test-Path $module)) { throw "Cannot find AppFilter.psm1 next to this test." }
@@ -377,14 +383,18 @@ foreach ($front in 'Start-RefreshAppServer.ps1', 'Get-RefreshAppList.ps1', 'Debu
     Assert-Envelope "no key in $front"          ($text -match '\$SecretKey\s*=') 'False'
 }
 
-Write-Host "`nLog path default" -ForegroundColor Cyan
+Write-Host "`nDefault paths" -ForegroundColor Cyan
 # Under Windows PowerShell 5.1 $PSScriptRoot can be empty while parameter
-# defaults bind, which put the log at the root of the drive. The default is
-# filled in in the script body instead.
-$serverAst = [System.Management.Automation.Language.Parser]::ParseFile(
-    (Join-Path $PSScriptRoot 'Start-RefreshAppServer.ps1'), [ref]$null, [ref]$null)
-$logParam = @($serverAst.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'LogPath' })[0]
-Assert-Envelope 'LogPath has no param default' ($null -eq $logParam.DefaultValue) 'True'
+# defaults bind, which put the log and the rules file at the root of the
+# drive. No parameter default may use it; the scripts fill those defaults in
+# in their bodies instead.
+foreach ($script in 'Start-RefreshAppServer.ps1', 'Get-RefreshAppList.ps1', 'Explain-AppRule.ps1',
+                    'Debug-AbsoluteLookup.ps1', 'Test-AppFilter.ps1') {
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $PSScriptRoot $script), [ref]$null, [ref]$null)
+    $bad = @($ast.ParamBlock.Parameters | Where-Object { $_.DefaultValue -and $_.DefaultValue.Extent.Text -match 'PSScriptRoot' })
+    Assert-Envelope "no script-root default: $script" $bad.Count '0'
+}
 
 Write-Host ""
 if ($failures -eq 0) { Write-Host "All cases passed." -ForegroundColor Green }
